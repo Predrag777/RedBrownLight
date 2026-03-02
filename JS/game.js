@@ -241,7 +241,7 @@ class AIEntity {
 // ======================== GRANNY FARTS ===============================
 class GrannyFarts {
   constructor(){
-    this.x=0; this.z=CFG.FIELD_L+8;
+    this.x=0; this.z=CFG.FIELD_L+30;
     this.turn=1;          // 0 = away, 1 = facing players
     this.facing=true;
     this.currentRotY=0;   // start facing players (brown = facing)
@@ -462,7 +462,7 @@ class Scene3D {
     this.orbGroup.add(this.orbMesh);
     this.orbLight = new THREE.PointLight(0x8B4513, 3, 40);
     this.orbGroup.add(this.orbLight);
-    this.orbGroup.position.set(0, 8, CFG.FIELD_L + 8);
+    this.orbGroup.position.set(0, 8, CFG.FIELD_L + 30);
     this.scene.add(this.orbGroup);
     this.orbTime = 0;
 
@@ -576,43 +576,42 @@ class Scene3D {
 
     // Prepare source
     srcFBX.scale.setScalar(treeScale);
+    // Collect all meshes for analysis
+    const meshes = [];
     srcFBX.traverse(c => {
-      if (c.isMesh) {
-        c.castShadow = true;
-        c.receiveShadow = true;
-        // Fix FBX materials — assign proper colors
-        const mats = Array.isArray(c.material) ? c.material : [c.material];
-        mats.forEach(mat => {
-          const name = (mat.name || c.name || '').toLowerCase();
-          const isTrunk = name.includes('bark') || name.includes('trunk') || name.includes('wood') || name.includes('branch') || name.includes('stem');
-          const isLeaf = name.includes('leaf') || name.includes('leaves') || name.includes('crown') || name.includes('foliage') || name.includes('canopy') || name.includes('green');
-          if (isTrunk) {
-            mat.color.set(0x8B6914);
-          } else if (isLeaf) {
-            mat.color.set(0x4a9e2f);
-          } else {
-            // Heuristic: compute bounding box — if geometry center Y is high, it's crown
-            if (c.geometry) {
-              c.geometry.computeBoundingBox();
-              const bb = c.geometry.boundingBox;
-              if (bb) {
-                const centerY = (bb.min.y + bb.max.y) / 2;
-                const height = bb.max.y - bb.min.y;
-                if (centerY > height * 0.3) {
-                  mat.color.set(0x4a9e2f); // crown green
-                } else {
-                  mat.color.set(0x8B6914); // trunk brown
-                }
-              } else {
-                mat.color.set(0x4a9e2f); // default to green
-              }
-            } else {
-              mat.color.set(0x4a9e2f);
-            }
-          }
-          mat.needsUpdate = true;
-        });
-      }
+      if (c.isMesh) meshes.push(c);
+    });
+
+    // Debug: log what the FBX contains
+    console.log('Tree FBX meshes:', meshes.map(m => ({
+      name: m.name,
+      matName: Array.isArray(m.material) ? m.material.map(mt=>mt.name) : m.material.name
+    })));
+
+    // Sort meshes by geometry center Y (lowest first)
+    meshes.forEach(m => {
+      if (m.geometry) m.geometry.computeBoundingBox();
+    });
+    meshes.sort((a, b) => {
+      const ay = a.geometry?.boundingBox ? (a.geometry.boundingBox.min.y + a.geometry.boundingBox.max.y) / 2 : 0;
+      const by = b.geometry?.boundingBox ? (b.geometry.boundingBox.min.y + b.geometry.boundingBox.max.y) / 2 : 0;
+      return ay - by;
+    });
+
+    // Bottom third = trunk, rest = crown
+    const trunkCount = Math.max(1, Math.floor(meshes.length / 3));
+
+    meshes.forEach((m, idx) => {
+      m.castShadow = true;
+      m.receiveShadow = true;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      const isTrunk = idx < trunkCount;
+      mats.forEach(mat => {
+        // Remove any embedded texture so our color shows
+        mat.map = null;
+        mat.color.set(isTrunk ? 0xa56e15 : 0x3f8500);
+        mat.needsUpdate = true;
+      });
     });
 
     for (let i = 0; i < count; i++) {
@@ -664,7 +663,7 @@ class Scene3D {
 
     // --- Granny Farts ---
     this.grannyMesh=this._prep(grannyFBX,CFG.GRANNY_SCALE,true);
-    this.grannyMesh.position.set(0,0,CFG.FIELD_L+8);
+    this.grannyMesh.position.set(0,0,CFG.FIELD_L+30);
     this.grannyMesh.rotation.y=Math.PI;
     this.scene.add(this.grannyMesh);
     const gm=new THREE.AnimationMixer(this.grannyMesh);
@@ -762,12 +761,13 @@ class Scene3D {
         this.playerMesh.rotation.y=0;
         // animation blend
         if(this.playerIdleA&&this.playerRunA){
-          const w=clamp(game.player.speed/20,0,1);
+          const finished = game.player.z >= CFG.FIELD_L;
+          const w = finished ? 0 : clamp(game.player.speed/20,0,1);
           this.playerRunA.enabled=true; this.playerIdleA.enabled=true;
           if(w>0.01&&!this.playerRunA.isRunning()) this.playerRunA.play();
           this.playerRunA.setEffectiveWeight(w);
           this.playerIdleA.setEffectiveWeight(1-w);
-          this.playerRunA.setEffectiveTimeScale(0.8+game.player.speed/CFG.MAX_SPEED*1.5);
+          this.playerRunA.setEffectiveTimeScale(finished ? 0 : 0.8+game.player.speed/CFG.MAX_SPEED*1.5);
         }
       }
     }
@@ -803,12 +803,13 @@ class Scene3D {
         const idleA=this.aiIdleActions[i];
         const runA=this.aiRunActions[i];
         if(idleA&&runA){
-          const w=clamp((a.speed||0)/20,0,1);
+          const finished = a.z >= CFG.FIELD_L;
+          const w = finished ? 0 : clamp((a.speed||0)/20,0,1);
           runA.enabled=true; idleA.enabled=true;
           if(w>0.01&&!runA.isRunning()) runA.play();
           runA.setEffectiveWeight(w);
           idleA.setEffectiveWeight(1-w);
-          runA.setEffectiveTimeScale(0.8+(a.speed||0)/CFG.MAX_SPEED*1.5);
+          runA.setEffectiveTimeScale(finished ? 0 : 0.8+(a.speed||0)/CFG.MAX_SPEED*1.5);
         }
       }
     }
@@ -1204,7 +1205,7 @@ class Game {
     // progress bar — horizontal, top-left with character PNG
     const barMargin = Math.round(16 * sc);
     const barY = Math.round(12 * sc);
-    const barW = Math.round(Math.min(260, W * 0.35) * sc);
+    const barW = Math.round(Math.min(260, W * 0.40) * sc);
     const barH = Math.round(14 * sc);
     const prog = clamp(this.player.progress, 0, 1);
 

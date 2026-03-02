@@ -98,8 +98,7 @@ html, body {
 #game-timer {
   position: absolute;
   top: clamp(8px, 2vw, 16px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: clamp(8px, 2vw, 16px);
   width: clamp(120px, 22vw, 200px);
   height: clamp(48px, 8vw, 80px);
   background: url('../UI/mainUI/timerBacker.png') center/contain no-repeat;
