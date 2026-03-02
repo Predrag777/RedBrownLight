@@ -4,6 +4,7 @@
 // =====================================================================
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { PirateBrain } from './characterBrain/pirate.js';
 
 // ======================== CONFIGURATION ==============================
 const CFG = {
@@ -39,6 +40,11 @@ const CFG = {
   // --- Model ---
   MODEL_SCALE: 0.018,
   GRANNY_SCALE: 0.11,
+
+  // --- Collision ---
+  COLLISION_RADIUS: 3.0,
+  PUSH_RECOVERY: 4.0,     // how fast pushed entities lose push velocity
+  PLAYER_PUSH_RESIST: 0.6, // player receives 60% push force
 };
 
 // ======================== UTILITIES ==================================
@@ -179,8 +185,8 @@ class Player {
     if (ca){ this.accT+=dt; this.speed=lerp(this.speed,targetSpeed(this.accT),dt*CFG.ACCEL_LERP); }
     else { this.accT=0; if(this.speed>0){ const f=1-(this.speed/CFG.MAX_SPEED)*0.6; this.speed=Math.max(0,this.speed-CFG.BASE_DECEL*Math.max(f,0.2)*dt); } }
     this.latSpd=0;
-    if (input.left) this.latSpd=-CFG.LATERAL_SPEED;
-    if (input.right) this.latSpd=CFG.LATERAL_SPEED;
+    if (input.left) this.latSpd=CFG.LATERAL_SPEED;
+    if (input.right) this.latSpd=-CFG.LATERAL_SPEED;
     this.z+=this.speed*dt; this.x+=this.latSpd*dt;
     this.x=clamp(this.x,-CFG.FIELD_W/2+2,CFG.FIELD_W/2-2);
     this.z=clamp(this.z,0,CFG.FIELD_L);
@@ -193,9 +199,78 @@ class Player {
 
 // ======================== AI =========================================
 class AIEntity {
-  constructor(x,z,type,name){ this.x=x; this.z=z; this.type=type; this.name=name; }
-  update(){}
-  get progress(){ return this.z/CFG.FIELD_L; }
+  constructor(x, z, type, name) {
+    this.x = x; this.z = z; this.type = type; this.name = name;
+    this.speed = 0;
+    this.vx = 0;            // push velocity X
+    this.vz = 0;            // push velocity Z
+    this.blasted = false;
+    this.stunTmr = 0;
+    this.brain = null;      // will be set for pirates
+    this.holdTmr = 0;       // simulated hold for non-pirate AI
+    this.brakeTmr = 0;
+  }
+
+  update(dt, light, player, allAI, myIdx) {
+    if (this.blasted) return;
+
+    // Apply push velocity decay
+    if (Math.abs(this.vx) > 0.1 || Math.abs(this.vz) > 0.1) {
+      this.x += this.vx * dt;
+      this.z += this.vz * dt;
+      this.vx *= (1 - CFG.PUSH_RECOVERY * dt);
+      this.vz *= (1 - CFG.PUSH_RECOVERY * dt);
+    }
+
+    // Stun
+    if (this.stunTmr > 0) {
+      this.stunTmr -= dt;
+      this.speed = Math.max(0, this.speed - 60 * dt);
+      return;
+    }
+
+    // --- Pirate brain ---
+    if (this.brain) {
+      this.brain.update(dt, light, player, allAI, myIdx, CFG, targetSpeed, clamp, lerp);
+      return;
+    }
+
+    // --- Default AI (demon/steady/bully basic movement) ---
+    const isBrown = light.isBrown || light.isTurning;
+    if (isBrown) {
+      // Vary speed by type
+      const maxHold = this.type === 'demon' ? 1.0 + Math.random() * 0.01
+        : this.type === 'bully' ? 0.7 + Math.random() * 0.01
+        : 0.5 + Math.random() * 0.01;
+      this.holdTmr = lerp(this.holdTmr, maxHold, dt * (2 + Math.random()));
+      this.speed = lerp(this.speed, targetSpeed(this.holdTmr), dt * CFG.ACCEL_LERP * 0.8);
+    } else {
+      // Brake
+      this.holdTmr = 0;
+      this.speed = Math.max(0, this.speed - CFG.BASE_DECEL * 0.7 * dt);
+    }
+
+    // Red light detection — AI also gets blasted if moving during red
+    if (light.isRed && light.canDetect && this.speed > CFG.VEL_THRESHOLD * 1.5) {
+      if (Math.random() < 0.003) { // rare — AI is usually good at stopping
+        this.blasted = true; this.speed = 0;
+      }
+    }
+
+    // Apply forward movement with small random lateral drift
+    this.z += this.speed * dt;
+    this.x += Math.sin(this.z * 0.1 + myIdx) * 0.3 * dt;
+    this.x = clamp(this.x, -CFG.FIELD_W / 2 + 2, CFG.FIELD_W / 2 - 2);
+    this.z = clamp(this.z, 0, CFG.FIELD_L);
+  }
+
+  applyPush(px, pz) {
+    this.vx += px;
+    this.vz += pz;
+    this.stunTmr = Math.max(this.stunTmr, 0.2);
+  }
+
+  get progress() { return this.z / CFG.FIELD_L; }
 }
 
 // ======================== GRANNY FARTS ===============================
@@ -230,6 +305,142 @@ class GrannyFarts {
     } else this.trackAngle=lerp(this.trackAngle,0,dt*3);
 
     this.currentRotY=lerp(this.currentRotY,targetRotY+this.trackAngle,dt*8);
+  }
+}
+
+// ======================== BLAST PARTICLES (Explosion + Smoke) ========
+class BlastParticles {
+  constructor(scene){
+    this.scene=scene;
+    this.particles=[];   // {mesh, vx, vy, vz, life, maxLife, type}
+    this.active=false;
+
+    // shared geometries
+    this.fireGeo=new THREE.SphereGeometry(0.5,6,6);
+    this.smokeGeo=new THREE.SphereGeometry(1.2,6,6);
+    this.debrisGeo=new THREE.BoxGeometry(0.3,0.3,0.3);
+  }
+
+  spawn(x, z){
+    this.clear();
+    this.active=true;
+    const y0=2;
+
+    // --- Fire / explosion particles (fast, bright) ---
+    for(let i=0;i<35;i++){
+      const hue=Math.random()*0.12; // red-orange-yellow
+      const color=new THREE.Color().setHSL(hue, 1, 0.5+Math.random()*0.4);
+      const mat=new THREE.MeshBasicMaterial({color, transparent:true, opacity:1, depthWrite:false});
+      const mesh=new THREE.Mesh(this.fireGeo, mat);
+      const s=0.3+Math.random()*1.2;
+      mesh.scale.set(s,s,s);
+      mesh.position.set(x, y0, z);
+      this.scene.add(mesh);
+      const angle=Math.random()*Math.PI*2;
+      const speed=8+Math.random()*18;
+      const vy=6+Math.random()*14;
+      this.particles.push({
+        mesh, vx:Math.cos(angle)*speed, vy, vz:Math.sin(angle)*speed,
+        life:0, maxLife:0.5+Math.random()*0.8, type:'fire'
+      });
+    }
+
+    // --- Smoke particles (slow, dark, longer-lasting) ---
+    for(let i=0;i<25;i++){
+      const grey=0.15+Math.random()*0.25;
+      const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(grey,grey,grey), transparent:true, opacity:0.7, depthWrite:false});
+      const mesh=new THREE.Mesh(this.smokeGeo, mat);
+      const s=0.5+Math.random()*1.5;
+      mesh.scale.set(s,s,s);
+      mesh.position.set(x+(Math.random()-0.5)*3, y0+Math.random()*2, z+(Math.random()-0.5)*3);
+      this.scene.add(mesh);
+      const angle=Math.random()*Math.PI*2;
+      const speed=1+Math.random()*4;
+      this.particles.push({
+        mesh, vx:Math.cos(angle)*speed, vy:2+Math.random()*5, vz:Math.sin(angle)*speed,
+        life:0, maxLife:1.5+Math.random()*1.5, type:'smoke'
+      });
+    }
+
+    // --- Debris chunks ---
+    for(let i=0;i<15;i++){
+      const mat=new THREE.MeshStandardMaterial({color:Math.random()>0.5?0x8B4513:0x555555, roughness:0.9});
+      const mesh=new THREE.Mesh(this.debrisGeo, mat);
+      const s=0.4+Math.random()*0.8;
+      mesh.scale.set(s, s, s);
+      mesh.position.set(x, y0, z);
+      this.scene.add(mesh);
+      const angle=Math.random()*Math.PI*2;
+      const speed=5+Math.random()*12;
+      this.particles.push({
+        mesh, vx:Math.cos(angle)*speed, vy:8+Math.random()*12, vz:Math.sin(angle)*speed,
+        life:0, maxLife:1.2+Math.random()*0.8, type:'debris',
+        rotSpeed:{x:Math.random()*10-5, y:Math.random()*10-5, z:Math.random()*10-5}
+      });
+    }
+  }
+
+  update(dt){
+    if(!this.active) return;
+    let allDead=true;
+    for(const p of this.particles){
+      p.life+=dt;
+      if(p.life>=p.maxLife){
+        p.mesh.visible=false;
+        continue;
+      }
+      allDead=false;
+      const t=p.life/p.maxLife; // 0→1 normalized
+
+      // gravity
+      p.vy-=18*dt;
+
+      // move
+      p.mesh.position.x+=p.vx*dt;
+      p.mesh.position.y+=p.vy*dt;
+      p.mesh.position.z+=p.vz*dt;
+
+      // floor clamp for debris
+      if(p.type==='debris' && p.mesh.position.y<0.15){
+        p.mesh.position.y=0.15;
+        p.vy=Math.abs(p.vy)*0.3; // small bounce
+        p.vx*=0.7; p.vz*=0.7;
+      }
+
+      if(p.type==='fire'){
+        p.mesh.material.opacity=1-t*t;
+        const s=(0.3+t*2)*(p.mesh.scale.x>1?1.2:1);
+        p.mesh.scale.set(s,s,s);
+        // shift to darker as it fades
+        const hue=0.08*(1-t);
+        p.mesh.material.color.setHSL(hue,1,0.5*(1-t*0.5));
+        p.vx*=(1-dt*2); p.vz*=(1-dt*2); // air drag
+      }
+      else if(p.type==='smoke'){
+        p.mesh.material.opacity=0.6*(1-t);
+        const grow=1+t*3;
+        p.mesh.scale.set(grow,grow,grow);
+        p.vy+=4*dt; // smoke rises
+        p.vx*=(1-dt*1.5); p.vz*=(1-dt*1.5);
+      }
+      else if(p.type==='debris'){
+        p.mesh.material.opacity=1-t*t;
+        p.mesh.rotation.x+=p.rotSpeed.x*dt;
+        p.mesh.rotation.y+=p.rotSpeed.y*dt;
+        p.mesh.rotation.z+=p.rotSpeed.z*dt;
+      }
+    }
+    if(allDead) this.clear();
+  }
+
+  clear(){
+    for(const p of this.particles){
+      this.scene.remove(p.mesh);
+      p.mesh.geometry!==this.fireGeo && p.mesh.geometry!==this.smokeGeo && p.mesh.geometry!==this.debrisGeo && p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+    }
+    this.particles=[];
+    this.active=false;
   }
 }
 
@@ -274,6 +485,9 @@ class Scene3D {
     this.blastLight=new THREE.PointLight(0x44ff44,0,80);
     this.blastLight.position.set(0,5,0);
     this.scene.add(this.blastLight);
+
+    // explosion + smoke particles
+    this.blastParticles=new BlastParticles(this.scene);
 
     window.addEventListener('resize',()=>this._onResize());
   }
@@ -501,6 +715,9 @@ class Scene3D {
       this.blastLight.position.set(game.blastFx.x,5,game.blastFx.z);
     } else this.blastLight.intensity=0;
 
+    // explosion + smoke particle update
+    this.blastParticles.update(dt);
+
     // --- camera follow: third-person behind player ---
     if (game.player){
       const pz=game.player.z;
@@ -578,12 +795,14 @@ class Game {
   _makeAI(){
     const types=[];
     for(let i=0;i<7;i++) types.push('demon');
-    for(let i=0;i<9;i++) types.push('steady');
-    for(let i=0;i<4;i++) types.push('bully');
+    for(let i=0;i<5;i++) types.push('steady');
+    for(let i=0;i<8;i++) types.push('pirate');
     for(let i=types.length-1;i>0;i--){ const j=randI(0,i);[types[i],types[j]]=[types[j],types[i]]; }
     return types.map((t,i)=>{
       const cols=10, gap=(CFG.FIELD_W-10)/(cols-1);
-      return new AIEntity(-CFG.FIELD_W/2+5+(i%cols)*gap, -2-Math.floor(i/cols)*5, t, `Bot-${i+1}`);
+      const ai=new AIEntity(-CFG.FIELD_W/2+5+(i%cols)*gap, -2-Math.floor(i/cols)*5, t, `Bot-${i+1}`);
+      if(t==='pirate') ai.brain=new PirateBrain(ai);
+      return ai;
     });
   }
 
@@ -621,6 +840,109 @@ class Game {
     this._flash('#33ff33',.5); this._showMsg('BLASTED!',1.5);
     this.shakeAmt=18;
     this.blastFx={x:this.player.x,z:this.player.z,tmr:2,max:2};
+    // spawn 3D explosion + smoke
+    if(this.scene3d&&this.scene3d.blastParticles){
+      this.scene3d.blastParticles.spawn(this.player.x, this.player.z);
+    }
+  }
+
+  // ======================== COLLISION SYSTEM ============================
+  _resolveCollisions(dt){
+    const p=this.player;
+    const R=CFG.COLLISION_RADIUS;
+    const R2=R*R;
+
+    // --- AI vs Player collisions ---
+    if(p && !p.blasted){
+      for(let i=0;i<this.ai.length;i++){
+        const a=this.ai[i];
+        if(a.blasted) continue;
+        const dx=a.x-p.x, dz=a.z-p.z;
+        const d2=dx*dx+dz*dz;
+        if(d2<R2 && d2>0.01){
+          const dist=Math.sqrt(d2);
+          const nx=dx/dist, nz=dz/dist;
+          const overlap=R-dist;
+
+          // Separate
+          const sep=overlap*0.5;
+          p.x-=nx*sep; p.z-=nz*sep;
+          a.x+=nx*sep; a.z+=nz*sep;
+
+          // If pirate brain — use its collision resolver
+          if(a.brain && a.brain.resolveCollision){
+            const push=a.brain.resolveCollision(p, true);
+            if(push){
+              // Push player (with resistance)
+              p.x+=push.x*CFG.PLAYER_PUSH_RESIST*dt*10;
+              p.speed=Math.max(0, p.speed+push.z*CFG.PLAYER_PUSH_RESIST*0.3);
+              // If pushed during red → player might get blasted from forced speed
+              if(this.light.isRed && push.force>10){
+                p.speed=Math.max(p.speed, CFG.VEL_THRESHOLD+2);
+              }
+              // Camera shake for impact
+              this.shakeAmt=Math.max(this.shakeAmt, push.force*0.3);
+              p.stunTmr=Math.max(p.stunTmr, 0.15);
+            }
+          } else {
+            // Generic bump — simple push apart
+            const bumpF=8;
+            p.x-=nx*bumpF*dt; p.speed=Math.max(0,p.speed-3);
+            a.vx=(a.vx||0)+nx*bumpF*0.5;
+          }
+        }
+      }
+    }
+
+    // --- AI vs AI collisions ---
+    for(let i=0;i<this.ai.length;i++){
+      const a=this.ai[i];
+      if(a.blasted) continue;
+      for(let j=i+1;j<this.ai.length;j++){
+        const b=this.ai[j];
+        if(b.blasted) continue;
+        const dx=b.x-a.x, dz=b.z-a.z;
+        const d2=dx*dx+dz*dz;
+        if(d2<R2 && d2>0.01){
+          const dist=Math.sqrt(d2);
+          const nx=dx/dist, nz=dz/dist;
+          const overlap=R-dist;
+
+          // Separate
+          const sep=overlap*0.5;
+          a.x-=nx*sep; a.z-=nz*sep;
+          b.x+=nx*sep; b.z+=nz*sep;
+
+          // Pirate A → B
+          if(a.brain && a.brain.resolveCollision){
+            const push=a.brain.resolveCollision(b, false);
+            if(push){
+              b.applyPush(push.x*0.4, push.z*0.3);
+              // If B moving too fast during red → blast
+              if(this.light.isRed && this.light.canDetect && (b.speed||0)>CFG.VEL_THRESHOLD*1.5){
+                b.blasted=true; b.speed=0;
+              }
+            }
+          }
+          // Pirate B → A
+          else if(b.brain && b.brain.resolveCollision){
+            const push=b.brain.resolveCollision(a, false);
+            if(push){
+              a.applyPush(push.x*0.4, push.z*0.3);
+              if(this.light.isRed && this.light.canDetect && (a.speed||0)>CFG.VEL_THRESHOLD*1.5){
+                a.blasted=true; a.speed=0;
+              }
+            }
+          }
+          // Generic AI bump
+          else {
+            const bumpF=5;
+            a.vx=(a.vx||0)-nx*bumpF*0.3;
+            b.vx=(b.vx||0)+nx*bumpF*0.3;
+          }
+        }
+      }
+    }
   }
 
   // ======================== UPDATE =======================================
@@ -651,7 +973,11 @@ class Game {
         if(this.player.z>=CFG.FIELD_L){ this.gameOver('YOU WIN!'); return; }
         this.player.tier>=3?(this.dangerPulse+=dt*8):(this.dangerPulse*=0.9);
         this.grannyFarts.update(dt,this.light.state,{x:this.player.x,z:this.player.z},this.light.fakeActive, this.light.isTurning?this.light.turnTimer/CFG.TURN_DURATION:0);
-        this.ai.forEach(a=>a.update(dt));
+        this.ai.forEach((a,i)=>a.update(dt, this.light, this.player, this.ai, i));
+
+        // === COLLISION SYSTEM ===
+        this._resolveCollisions(dt);
+
         if(this.blastFx){ this.blastFx.tmr-=dt; if(this.blastFx.tmr<=0){ this.player.reset(); this.blastFx=null; } }
         break;
       }
