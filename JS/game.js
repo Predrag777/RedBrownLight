@@ -17,6 +17,7 @@ const CFG = {
   RED_MIN: 1.5,   RED_MAX: 3.0,
   GRACE: 0.18,
   VEL_THRESHOLD: 3.0,
+  TURN_DURATION: 0.7,  // how long Granny takes to turn around
 
   // --- Movement ---
   MAX_SPEED: 100,
@@ -24,11 +25,11 @@ const CFG = {
   BASE_DECEL: 80,
   ACCEL_LERP: 5,
 
-  // --- Camera  (high & far back so Granny is always visible) ---
-  CAM_HEIGHT: 220,
-  CAM_BACK: 110,
-  CAM_LOOK_AHEAD: 100,
-  CAM_SMOOTH: 2.5,
+  // --- Camera (third-person behind player) ---
+  CAM_HEIGHT: 35,
+  CAM_BACK: 50,
+  CAM_LOOK_AHEAD: 40,
+  CAM_SMOOTH: 4.0,
 
   // --- Match ---
   TIMEOUT: 120,
@@ -37,7 +38,7 @@ const CFG = {
 
   // --- Model ---
   MODEL_SCALE: 0.018,
-  GRANNY_SCALE: 0.022,
+  GRANNY_SCALE: 0.11,
 };
 
 // ======================== UTILITIES ==================================
@@ -95,10 +96,12 @@ class GameAudio {
 // ======================== LIGHT SYSTEM ===============================
 class LightSystem {
   constructor() {
-    this.state='brown'; this.timer=0; this.dur=0; this.graceT=0;
+    this.state='brown';     // 'brown' | 'turning' | 'red'
+    this.timer=0; this.dur=0; this.graceT=0;
     this.canDetect=false; this.cycle=0;
     this.fakeUsed=false; this.fakeActive=false; this.fakeTmr=0;
     this.onSwitch=null;
+    this.turnTimer=0;       // time spent in 'turning' state
     this._startBrown();
   }
   _startBrown() {
@@ -107,6 +110,11 @@ class LightSystem {
     this.dur=rand(CFG.BROWN_MIN*sh,CFG.BROWN_MAX*sh);
     this.timer=0; this.canDetect=false; this.fakeActive=false;
     if (this.onSwitch) this.onSwitch('brown');
+  }
+  _startTurning() {
+    this.state='turning';
+    this.turnTimer=0;
+    if (this.onSwitch) this.onSwitch('turning');
   }
   _startRed() {
     this.state='red'; this.dur=rand(CFG.RED_MIN,CFG.RED_MAX);
@@ -117,6 +125,11 @@ class LightSystem {
     this.timer+=dt;
     if (this.fakeActive){ this.fakeTmr-=dt; if(this.fakeTmr<=0) this.fakeActive=false; }
     if (this.state==='red'){ this.graceT+=dt; if(this.graceT>=CFG.GRACE) this.canDetect=true; }
+    if (this.state==='turning'){
+      this.turnTimer+=dt;
+      if(this.turnTimer>=CFG.TURN_DURATION) this._startRed();
+      return;
+    }
     if (this.timer>=this.dur) {
       if (this.state==='brown') {
         if (!this.fakeUsed && this.cycle>=2 && Math.random()<0.12) {
@@ -124,12 +137,13 @@ class LightSystem {
           this.timer=0; this.dur=rand(1.5,2.5);
           if (this.onSwitch) this.onSwitch('fake'); return;
         }
-        this._startRed();
+        this._startTurning();
       } else this._startBrown();
     }
   }
   get isBrown(){ return this.state==='brown'; }
   get isRed()  { return this.state==='red'; }
+  get isTurning(){ return this.state==='turning'; }
 }
 
 // ======================== PLAYER =====================================
@@ -137,7 +151,7 @@ class Player {
   constructor() { this.x=0; this.z=0; this.speed=0; this.latSpd=0; this.accT=0; this.blasted=false; this.stunTmr=0; }
   update(dt, input, light) {
     if (this.blasted||this.stunTmr>0){ this.stunTmr-=dt; this.speed=Math.max(0,this.speed-60*dt); this.accT=0; return; }
-    const ca=input.fwd&&light.isBrown;
+    const ca=input.fwd&&(light.isBrown||light.isTurning);
     if (ca){ this.accT+=dt; this.speed=lerp(this.speed,targetSpeed(this.accT),dt*CFG.ACCEL_LERP); }
     else { this.accT=0; if(this.speed>0){ const f=1-(this.speed/CFG.MAX_SPEED)*0.6; this.speed=Math.max(0,this.speed-CFG.BASE_DECEL*Math.max(f,0.2)*dt); } }
     this.latSpd=0;
@@ -164,21 +178,34 @@ class AIEntity {
 class GrannyFarts {
   constructor(){
     this.x=0; this.z=CFG.FIELD_L+8;
-    this.turn=0; this.facing=false;
-    this.targetRotY=Math.PI; this.currentRotY=Math.PI;
+    this.turn=1;          // 0 = away, 1 = facing players
+    this.facing=true;
+    this.currentRotY=0;   // start facing players (brown = facing)
     this.trackAngle=0;
   }
-  update(dt, lightState, leaderPos, fakeActive){
-    let tgt = lightState==='red'?1:0;
-    if (fakeActive) tgt=0.45;
-    this.turn=lerp(this.turn,tgt,dt*(tgt>this.turn?10:5));
+  update(dt, lightState, leaderPos, fakeActive, turnProgress){
+    // turnProgress: 0→1 during 'turning' state (Granny rotating AWAY)
+    if (lightState==='turning'){
+      // Smoothly rotate from 0 (facing) toward Math.PI (away)
+      this.turn=clamp(1-turnProgress,0,1);
+    } else if (lightState==='red'){
+      this.turn=0; // fully away (back to players)
+    } else {
+      // brown: face players
+      this.turn=lerp(this.turn,1,dt*5);
+    }
+    if (fakeActive) this.turn=clamp(this.turn-0.3,0.5,1); // small twitch
+
     this.facing=this.turn>0.5;
-    this.targetRotY=this.facing?0:Math.PI;
+    const targetRotY=Math.PI*(1-this.turn); // 0=facing, PI=away
+
+    // subtle leader tracking during brown (when facing players)
     if (leaderPos&&lightState==='brown'){
       const dx=leaderPos.x-this.x;
       this.trackAngle=lerp(this.trackAngle,Math.atan2(dx,30)*0.3,dt*3);
     } else this.trackAngle=lerp(this.trackAngle,0,dt*3);
-    this.currentRotY=lerp(this.currentRotY,this.targetRotY+this.trackAngle,dt*8);
+
+    this.currentRotY=lerp(this.currentRotY,targetRotY+this.trackAngle,dt*8);
   }
 }
 
@@ -197,16 +224,16 @@ class Scene3D {
     this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure=1.0;
+    this.renderer.toneMappingExposure=1.6;
     container.insertBefore(this.renderer.domElement,container.firstChild);
 
-    // scene
+    // scene — bright sky
     this.scene=new THREE.Scene();
-    this.scene.background=new THREE.Color(0x1a0f0a);
-    this.scene.fog=new THREE.Fog(0x1a0f0a,400,800);
+    this.scene.background=new THREE.Color(0x87ceeb);
+    this.scene.fog=new THREE.Fog(0x87ceeb,300,700);
 
-    // camera — high vantage, sees far ahead to Granny
-    this.camera=new THREE.PerspectiveCamera(55,window.innerWidth/window.innerHeight,1,1200);
+    // camera — third-person behind player
+    this.camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.5,900);
     this.camera.position.set(0,CFG.CAM_HEIGHT,-CFG.CAM_BACK);
     this.camera.lookAt(0,0,CFG.CAM_LOOK_AHEAD);
     this.camTarget=new THREE.Vector3(0,0,0);
@@ -228,9 +255,9 @@ class Scene3D {
   }
 
   _setupLights(){
-    this.scene.add(new THREE.AmbientLight(0x998877,0.7));
-    this.scene.add(new THREE.HemisphereLight(0xccaa88,0x553322,0.5));
-    this.dirLight=new THREE.DirectionalLight(0xffe8cc,1.8);
+    this.scene.add(new THREE.AmbientLight(0xffffff,1.2));
+    this.scene.add(new THREE.HemisphereLight(0xffffff,0x88aacc,0.9));
+    this.dirLight=new THREE.DirectionalLight(0xffffff,2.2);
     this.dirLight.position.set(30,80,60);
     this.dirLight.castShadow=true;
     this.dirLight.shadow.mapSize.set(2048,2048);
@@ -239,36 +266,43 @@ class Scene3D {
     this.dirLight.shadow.camera.top=200; this.dirLight.shadow.camera.bottom=-200;
     this.dirLight.shadow.bias=-0.001;
     this.scene.add(this.dirLight); this.scene.add(this.dirLight.target);
-    this.moodLight=new THREE.DirectionalLight(0xaa6633,0.3);
+    this.moodLight=new THREE.DirectionalLight(0xffffff,0.5);
     this.moodLight.position.set(-20,40,-30);
     this.scene.add(this.moodLight);
   }
 
   _buildGround(){
-    const tc=document.createElement('canvas'); tc.width=512; tc.height=512;
-    const tg=tc.getContext('2d');
-    tg.fillStyle='#5c3d2e'; tg.fillRect(0,0,512,512);
-    for(let i=0;i<600;i++){
-      const sh=rand(-22,22);
-      tg.fillStyle=`rgb(${clamp(92+sh,30,150)},${clamp(61+sh*0.7,20,110)},${clamp(46+sh*0.5,10,90)})`;
-      tg.beginPath(); tg.arc(rand(0,512),rand(0,512),rand(2,14),0,Math.PI*2); tg.fill();
-    }
-    const mudTex=new THREE.CanvasTexture(tc);
-    mudTex.wrapS=mudTex.wrapT=THREE.RepeatWrapping; mudTex.repeat.set(8,50);
+    // --- Green grass surround ---
+    const grassGeo=new THREE.PlaneGeometry(CFG.FIELD_W*4, CFG.FIELD_L+200);
+    const grassMat=new THREE.MeshStandardMaterial({color:0x4caf50,roughness:0.9,metalness:0});
+    const grass=new THREE.Mesh(grassGeo,grassMat);
+    grass.rotation.x=-Math.PI/2; grass.position.set(0,-0.05,CFG.FIELD_L/2);
+    grass.receiveShadow=true; this.scene.add(grass);
 
+    // --- White track ---
     this.ground=new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.FIELD_W,CFG.FIELD_L+40),
-      new THREE.MeshStandardMaterial({map:mudTex,roughness:0.95,metalness:0,color:0x6b4226})
+      new THREE.MeshStandardMaterial({color:0xf5f5f5,roughness:0.55,metalness:0})
     );
     this.ground.rotation.x=-Math.PI/2;
     this.ground.position.set(0,0,CFG.FIELD_L/2);
     this.ground.receiveShadow=true;
     this.scene.add(this.ground);
 
-    const wm=new THREE.MeshStandardMaterial({color:0x2a1a0e,roughness:1});
+    // --- Lane lines (subtle grey stripes) ---
+    const laneMat=new THREE.MeshBasicMaterial({color:0xcccccc,transparent:true,opacity:0.5});
+    for(let i=-3;i<=3;i++){
+      if(i===0) continue;
+      const lane=new THREE.Mesh(new THREE.PlaneGeometry(0.15,CFG.FIELD_L+40),laneMat);
+      lane.rotation.x=-Math.PI/2; lane.position.set(i*(CFG.FIELD_W/8),0.02,CFG.FIELD_L/2);
+      this.scene.add(lane);
+    }
+
+    // --- Track borders (thick coloured lines) ---
+    const borderMat=new THREE.MeshStandardMaterial({color:0x333333,roughness:0.8});
     for(const s of[-1,1]){
-      const w=new THREE.Mesh(new THREE.BoxGeometry(2,4,CFG.FIELD_L+40),wm);
-      w.position.set(s*(CFG.FIELD_W/2+1),2,CFG.FIELD_L/2);
+      const w=new THREE.Mesh(new THREE.BoxGeometry(1,0.5,CFG.FIELD_L+40),borderMat);
+      w.position.set(s*(CFG.FIELD_W/2+0.5),0.25,CFG.FIELD_L/2);
       w.receiveShadow=true; this.scene.add(w);
     }
 
@@ -276,7 +310,7 @@ class Scene3D {
     const fzLen=CFG.FIELD_L-CFG.FINISH_ZONE_START;
     const fz=new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.FIELD_W-.5,fzLen),
-      new THREE.MeshStandardMaterial({color:0xff8800,transparent:true,opacity:0.08,roughness:1,depthWrite:false})
+      new THREE.MeshStandardMaterial({color:0xff8800,transparent:true,opacity:0.10,roughness:1,depthWrite:false})
     );
     fz.rotation.x=-Math.PI/2; fz.position.set(0,0.05,CFG.FINISH_ZONE_START+fzLen/2);
     this.scene.add(fz);
@@ -393,16 +427,19 @@ class Scene3D {
   sync(game,dt){
     for(const m of this.mixers) m.update(dt);
 
-    // mood lighting
+    // mood lighting — subtle tint changes, stays bright
     if (game.light){
       const r=game.light.isRed;
-      this.scene.background.set(r?0x140808:0x1a0f0a);
-      this.scene.fog.color.set(r?0x140808:0x1a0f0a);
-      this.dirLight.color.set(r?0xff8888:0xffe8cc);
-      this.dirLight.intensity=r?1.2:1.8;
-      this.moodLight.color.set(r?0xff2222:0xaa6633);
-      this.moodLight.intensity=r?0.6:0.3;
-      this.ground.material.color.set(r?0x4a2a1c:0x6b4226);
+      const t=game.light.isTurning;
+      // turning = transitional amber tint
+      const bgClr=r?0xf0b0b0:t?0xe8d8a0:0x87ceeb;
+      this.scene.background.set(bgClr);
+      this.scene.fog.color.set(bgClr);
+      this.dirLight.color.set(r?0xffcccc:t?0xffeecc:0xffffff);
+      this.dirLight.intensity=r?1.8:2.2;
+      this.moodLight.color.set(r?0xff8888:t?0xffaa44:0xffffff);
+      this.moodLight.intensity=r?0.7:t?0.6:0.5;
+      this.ground.material.color.set(r?0xeecccc:0xf5f5f5);
     }
 
     // player mesh
@@ -440,19 +477,17 @@ class Scene3D {
       this.blastLight.position.set(game.blastFx.x,5,game.blastFx.z);
     } else this.blastLight.intensity=0;
 
-    // --- camera follow (high & far — Granny always visible) ---
+    // --- camera follow: third-person behind player ---
     if (game.player){
       const pz=game.player.z;
       this.camTarget.set(
-        lerp(this.camTarget.x,game.player.x*0.3,dt*2),
+        lerp(this.camTarget.x,game.player.x*0.6,dt*3),
         0,
-        lerp(this.camTarget.z,pz+70,dt*CFG.CAM_SMOOTH)
+        lerp(this.camTarget.z,pz,dt*CFG.CAM_SMOOTH)
       );
-      const prog=game.player.progress;
-      const camH=lerp(CFG.CAM_HEIGHT,CFG.CAM_HEIGHT*0.75,clamp(prog-0.7,0,0.3)/0.3);
 
-      this.camera.position.set(this.camTarget.x, camH, this.camTarget.z-CFG.CAM_BACK);
-      this.camera.lookAt(this.camTarget.x, 0, this.camTarget.z+CFG.CAM_LOOK_AHEAD);
+      this.camera.position.set(this.camTarget.x, CFG.CAM_HEIGHT, this.camTarget.z-CFG.CAM_BACK);
+      this.camera.lookAt(this.camTarget.x, 2, this.camTarget.z+CFG.CAM_LOOK_AHEAD);
 
       this.dirLight.position.set(this.camTarget.x+30,80,this.camTarget.z+60);
       this.dirLight.target.position.set(this.camTarget.x,0,this.camTarget.z);
@@ -483,6 +518,7 @@ class Game {
     this.hudCanvas=document.getElementById('hudCanvas');
     this.ctx=this.hudCanvas.getContext('2d');
     this.input=new Input(); this.audio=new GameAudio(); this.scene3d=null;
+    this.headerEl=document.getElementById('light-header');
 
     this.state='loading'; this.matchTmr=0; this.cdTmr=0; this.cdNum=3; this.goReason='';
     this.msg=''; this.msgTmr=0; this.flashClr=''; this.flashTmr=0;
@@ -521,13 +557,25 @@ class Game {
     this.shakeAmt=0; this.blastFx=null;
     this.player=new Player(); this.grannyFarts=new GrannyFarts(); this.ai=this._makeAI();
     this.light=new LightSystem(); this.light.onSwitch=s=>this._onLight(s);
+    if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
     this.audio.tick();
   }
   gameOver(r){ this.state='gameover'; this.goReason=r; this._showMsg(r,99); r.includes('WIN')?this.audio.go():this.audio.blast(); }
 
   _onLight(s){
-    if(s==='brown'){ this._showMsg('BROWN LIGHT',1); this._flash('#8B4513',.3); this.audio.brown(); }
-    else if(s==='red'){ this._showMsg('RED LIGHT!',1); this._flash('#ff0000',.35); this.audio.red(); }
+    if(s==='brown'){
+      this._showMsg('BROWN LIGHT',1); this._flash('#8B4513',.3); this.audio.brown();
+      if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
+    }
+    else if(s==='turning'){
+      // Granny is turning — show warning, no sound yet
+      this._showMsg('👀 TURNING…',0.8);
+      if(this.headerEl){ this.headerEl.className='red'; this.headerEl.textContent='● TURNING…'; }
+    }
+    else if(s==='red'){
+      this._showMsg('RED LIGHT!',1); this._flash('#ff0000',.35); this.audio.red();
+      if(this.headerEl){ this.headerEl.className='red'; this.headerEl.textContent='● RED LIGHT'; }
+    }
     else if(s==='fake'){ this._flash('#ffaa00',.2); }
   }
   _showMsg(t,d){ this.msg=t; this.msgTmr=d; }
@@ -567,7 +615,7 @@ class Game {
         }
         if(this.player.z>=CFG.FIELD_L){ this.gameOver('YOU WIN!'); return; }
         this.player.tier>=3?(this.dangerPulse+=dt*8):(this.dangerPulse*=0.9);
-        this.grannyFarts.update(dt,this.light.state,{x:this.player.x,z:this.player.z},this.light.fakeActive);
+        this.grannyFarts.update(dt,this.light.state,{x:this.player.x,z:this.player.z},this.light.fakeActive, this.light.isTurning?this.light.turnTimer/CFG.TURN_DURATION:0);
         this.ai.forEach(a=>a.update(dt));
         if(this.blastFx){ this.blastFx.tmr-=dt; if(this.blastFx.tmr<=0){ this.player.reset(); this.blastFx=null; } }
         break;
@@ -586,10 +634,10 @@ class Game {
     if(this.scene3d&&this.state!=='loading'){ this.scene3d.sync(this,dt); this.scene3d.render(); }
 
     switch(this.state){
-      case 'menu': this._rMenu(ctx,W,H); break;
+      case 'menu': this._rMenu(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; break;
       case 'countdown': this._rHUD(ctx,W,H); this._rCD(ctx,W,H); break;
       case 'playing': this._rHUD(ctx,W,H); break;
-      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); break;
+      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; break;
     }
 
     // flash
@@ -640,15 +688,11 @@ class Game {
   _rHUD(ctx,W,H){
     if(!this.light||!this.player) return;
     const isR=this.light.isRed;
-    // light status
-    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,W/2-95,6,190,36,6); ctx.fill();
-    ctx.fillStyle=isR?'#ff2222':'#AA6633'; ctx.font='bold 18px monospace'; ctx.textAlign='center';
-    ctx.fillText(isR?'● RED LIGHT':'● BROWN LIGHT',W/2,30);
-    // timer
+    // timer — top right (below header)
     const m=Math.floor(this.matchTmr/60),s=Math.floor(this.matchTmr%60);
-    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,W-110,6,100,36,6); ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,W-110,60,100,36,6); ctx.fill();
     ctx.fillStyle=this.matchTmr>100?'#ff4444':'#ddd'; ctx.font='16px monospace'; ctx.textAlign='right';
-    ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,W-18,30);
+    ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,W-18,84);
     // speed bar
     const bx=16,by=H/2-120,bw=22,bh=240;
     const ratio=clamp(this.player.speed/CFG.MAX_SPEED,0,1),tier=this.player.tier;
