@@ -606,15 +606,21 @@ class Scene3D {
     }
     this.aiMeshes=[];
     this.aiMixers=[];
+    this.aiIdleActions=[];
+    this.aiRunActions=[];
     for(let i=0;i<aiList.length;i++){
       const src=aiList[i].type==='pirate'?this._pirateFBX:this._suitFBX;
       const mesh=this._prep(src,CFG.MODEL_SCALE,false);
       this.scene.add(mesh);
       const mx=new THREE.AnimationMixer(mesh);
-      if(this.idleClip){ const a=mx.clipAction(this.idleClip); a.play(); a.time=rand(0,a.getClip().duration); }
+      let idleA=null, runA=null;
+      if(this.idleClip){ idleA=mx.clipAction(this.idleClip); idleA.play(); idleA.time=rand(0,idleA.getClip().duration); }
+      if(this.runClip){ runA=mx.clipAction(this.runClip); runA.play(); runA.setEffectiveWeight(0); }
       this.mixers.push(mx);
       this.aiMixers.push(mx);
       this.aiMeshes.push(mesh);
+      this.aiIdleActions.push(idleA);
+      this.aiRunActions.push(runA);
     }
   }
 
@@ -690,7 +696,20 @@ class Scene3D {
     if (game.ai) for(let i=0;i<game.ai.length&&i<this.aiMeshes.length;i++){
       const a=game.ai[i];
       this.aiMeshes[i].visible=!a.blasted;
-      if(!a.blasted) this.aiMeshes[i].position.set(a.x,0,a.z);
+      if(!a.blasted){
+        this.aiMeshes[i].position.set(a.x,0,a.z);
+        // Animation blend: idle ↔ run (same as player)
+        const idleA=this.aiIdleActions[i];
+        const runA=this.aiRunActions[i];
+        if(idleA&&runA){
+          const w=clamp((a.speed||0)/20,0,1);
+          runA.enabled=true; idleA.enabled=true;
+          if(w>0.01&&!runA.isRunning()) runA.play();
+          runA.setEffectiveWeight(w);
+          idleA.setEffectiveWeight(1-w);
+          runA.setEffectiveTimeScale(0.8+(a.speed||0)/CFG.MAX_SPEED*1.5);
+        }
+      }
     }
 
     // blast glow
