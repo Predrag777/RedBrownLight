@@ -6,6 +6,10 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { PirateBrain } from './characterBrain/pirate.js';
 import { Player } from './characterBrain/myPlayer.js';
+import { SpacesuitBrain } from './characterBrain/spacesuit.js';
+import { RapperBrain } from './characterBrain/rapper.js';
+import { ZombieBrain } from './characterBrain/zombie.js';
+import { MariachiBrain } from './characterBrain/mariachi.js';
 
 // ======================== CONFIGURATION ==============================
 const CFG = {
@@ -639,7 +643,7 @@ class Scene3D {
     const base='characters/FBX%20Files/';
     const load = n => new Promise((res,rej)=> loader.load(base+encodeURIComponent(n),res,undefined,rej));
 
-    let done=0; const total=7;
+    let done=0; const total=10;
     const tick=label=>{ done++; if(onProgress) onProgress(done/total,label); };
 
     const playerFBX = await load('MrFarts.fbx');         tick('MrFarts loaded');
@@ -648,6 +652,9 @@ class Scene3D {
     const grannyFBX = await load('Grandma.fbx');         tick('Grandma loaded');
     const suitFBX   = await load('Spacesuit.fbx');       tick('Spacesuit loaded');
     const pirateFBX = await load('Pirate.fbx');          tick('Pirate loaded');
+    const rapperFBX = await load('Rapper.fbx');           tick('Rapper loaded');
+    const zombieFBX = await load('Zombie.fbx');            tick('Zombie loaded');
+    const mariachiFBX = await load('Mariachi.fbx');        tick('Mariachi loaded');
     const treeFBX = await loader.loadAsync('treeModels/tree.fbx'); tick('Trees loaded');
 
     // --- Player (MrFarts) ---
@@ -677,6 +684,9 @@ class Scene3D {
     // Store FBX sources for later — meshes created per match in buildAIMeshes()
     this._suitFBX=suitFBX;
     this._pirateFBX=pirateFBX;
+    this._rapperFBX=rapperFBX;
+    this._zombieFBX=zombieFBX;
+    this._mariachiFBX=mariachiFBX;
     this.aiMeshes=[];
     this.aiMixers=[];
   }
@@ -695,7 +705,14 @@ class Scene3D {
     this.aiIdleActions=[];
     this.aiRunActions=[];
     for(let i=0;i<aiList.length;i++){
-      const src=aiList[i].type==='pirate'?this._pirateFBX:this._suitFBX;
+      let src;
+      switch(aiList[i].type){
+        case 'pirate': src=this._pirateFBX; break;
+        case 'rapper': src=this._rapperFBX; break;
+        case 'zombie': src=this._zombieFBX; break;
+        case 'mariachi': src=this._mariachiFBX; break;
+        default: src=this._suitFBX; break;
+      }
       const mesh=this._prep(src,CFG.MODEL_SCALE,false);
       this.scene.add(mesh);
       const mx=new THREE.AnimationMixer(mesh);
@@ -902,9 +919,13 @@ class Game {
 
   _makeAI(){
     const types=[];
-    for(let i=0;i<7;i++) types.push('demon');
-    for(let i=0;i<5;i++) types.push('steady');
-    for(let i=0;i<8;i++) types.push('pirate');
+    for(let i=0;i<4;i++) types.push('demon');
+    for(let i=0;i<4;i++) types.push('steady');
+    for(let i=0;i<5;i++) types.push('pirate');
+    for(let i=0;i<3;i++) types.push('spacesuit');
+    for(let i=0;i<3;i++) types.push('rapper');
+    for(let i=0;i<3;i++) types.push('zombie');
+    for(let i=0;i<3;i++) types.push('mariachi');
     for(let i=types.length-1;i>0;i--){ const j=randI(0,i);[types[i],types[j]]=[types[j],types[i]]; }
     const count = types.length;
     const margin = 4;
@@ -915,6 +936,10 @@ class Game {
       const staggerZ = -2 - (i % 3) * 4;
       const ai = new AIEntity(laneX, staggerZ, t, `Bot-${i+1}`);
       if(t==='pirate') ai.brain=new PirateBrain(ai);
+      else if(t==='spacesuit') ai.brain=new SpacesuitBrain(ai);
+      else if(t==='rapper') ai.brain=new RapperBrain(ai);
+      else if(t==='zombie') ai.brain=new ZombieBrain(ai);
+      else if(t==='mariachi') ai.brain=new MariachiBrain(ai);
       return ai;
     });
   }
