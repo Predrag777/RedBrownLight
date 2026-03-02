@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { PirateBrain } from './characterBrain/pirate.js';
+import { Player } from './characterBrain/myPlayer.js';
 
 // ======================== CONFIGURATION ==============================
 const CFG = {
@@ -174,27 +175,6 @@ class LightSystem {
   get isBrown(){ return this.state==='brown'; }
   get isRed()  { return this.state==='red'; }
   get isTurning(){ return this.state==='turning'; }
-}
-
-// ======================== PLAYER =====================================
-class Player {
-  constructor() { this.x=0; this.z=0; this.speed=0; this.latSpd=0; this.accT=0; this.blasted=false; this.stunTmr=0; }
-  update(dt, input, light) {
-    if (this.blasted||this.stunTmr>0){ this.stunTmr-=dt; this.speed=Math.max(0,this.speed-60*dt); this.accT=0; return; }
-    const ca=input.fwd&&(light.isBrown||light.isTurning);
-    if (ca){ this.accT+=dt; this.speed=lerp(this.speed,targetSpeed(this.accT),dt*CFG.ACCEL_LERP); }
-    else { this.accT=0; if(this.speed>0){ const f=1-(this.speed/CFG.MAX_SPEED)*0.6; this.speed=Math.max(0,this.speed-CFG.BASE_DECEL*Math.max(f,0.2)*dt); } }
-    this.latSpd=0;
-    if (input.left) this.latSpd=CFG.LATERAL_SPEED;
-    if (input.right) this.latSpd=-CFG.LATERAL_SPEED;
-    this.z+=this.speed*dt; this.x+=this.latSpd*dt;
-    this.x=clamp(this.x,-CFG.FIELD_W/2+2,CFG.FIELD_W/2-2);
-    this.z=clamp(this.z,0,CFG.FIELD_L);
-  }
-  get progress(){ return this.z/CFG.FIELD_L; }
-  get tier()    { return speedTier(this.speed); }
-  blast() { this.blasted=true; this.speed=0; this.accT=0; }
-  reset() { this.z=0; this.x=0; this.speed=0; this.accT=0; this.blasted=false; this.stunTmr=0; }
 }
 
 // ======================== AI =========================================
@@ -809,7 +789,7 @@ class Game {
   startMatch(){
     this.state='countdown'; this.cdTmr=0; this.cdNum=3; this.matchTmr=0; this.goReason='';
     this.shakeAmt=0; this.blastFx=null;
-    this.player=new Player(); this.grannyFarts=new GrannyFarts(); this.ai=this._makeAI();
+    this.player=new Player(CFG, lerp, clamp, targetSpeed, speedTier); this.grannyFarts=new GrannyFarts(); this.ai=this._makeAI();
     this.light=new LightSystem(); this.light.onSwitch=s=>this._onLight(s);
     if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
     this.audio.tick();
