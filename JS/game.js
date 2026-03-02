@@ -417,7 +417,7 @@ class Scene3D {
     this.container=container;
 
     // renderer
-    this.renderer=new THREE.WebGLRenderer({antialias:true});
+    this.renderer=new THREE.WebGLRenderer({antialias:true, alpha:true});
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
     this.renderer.shadowMap.enabled=true;
@@ -429,7 +429,7 @@ class Scene3D {
 
     // scene — bright sky
     this.scene=new THREE.Scene();
-    this.scene.background=new THREE.Color(0x87ceeb);
+    this.scene.background = null;
     this.scene.fog=new THREE.Fog(0x87ceeb,300,700);
 
     // camera — third-person behind player
@@ -450,6 +450,21 @@ class Scene3D {
     this.blastLight=new THREE.PointLight(0x44ff44,0,80);
     this.blastLight.position.set(0,5,0);
     this.scene.add(this.blastLight);
+
+    // Light-state orb (near Granny)
+    this.orbGroup = new THREE.Group();
+    const orbGeo = new THREE.SphereGeometry(1.2, 24, 24);
+    this.orbMat = new THREE.MeshStandardMaterial({
+      color: 0x8B4513, emissive: 0x8B4513, emissiveIntensity: 1.5,
+      transparent: true, opacity: 0.85, roughness: 0.2, metalness: 0.3
+    });
+    this.orbMesh = new THREE.Mesh(orbGeo, this.orbMat);
+    this.orbGroup.add(this.orbMesh);
+    this.orbLight = new THREE.PointLight(0x8B4513, 3, 40);
+    this.orbGroup.add(this.orbLight);
+    this.orbGroup.position.set(0, 8, CFG.FIELD_L + 8);
+    this.scene.add(this.orbGroup);
+    this.orbTime = 0;
 
     // explosion + smoke particles
     this.blastParticles=new BlastParticles(this.scene);
@@ -477,7 +492,7 @@ class Scene3D {
   _buildGround(){
     // --- Green grass surround ---
     const grassGeo=new THREE.PlaneGeometry(CFG.FIELD_W*4, CFG.FIELD_L+200);
-    const grassMat=new THREE.MeshStandardMaterial({color:0x4caf50,roughness:0.9,metalness:0});
+    const grassMat=new THREE.MeshStandardMaterial({color:0x79b901,roughness:0.9,metalness:0});
     const grass=new THREE.Mesh(grassGeo,grassMat);
     grass.rotation.x=-Math.PI/2; grass.position.set(0,-0.05,CFG.FIELD_L/2);
     grass.receiveShadow=true; this.scene.add(grass);
@@ -551,13 +566,81 @@ class Scene3D {
     }
   }
 
+  _scatterTrees(srcFBX){
+    const treeScale = 0.04;
+    const count = 60; // total trees (30 per side)
+    const trackEdge = CFG.FIELD_W / 2 + 8; // 48 — safe distance from track
+    const maxX = CFG.FIELD_W * 2 - 10; // 150 — don't go too far from track
+    const minZ = -30;
+    const maxZ = CFG.FIELD_L + 80;
+
+    // Prepare source
+    srcFBX.scale.setScalar(treeScale);
+    srcFBX.traverse(c => {
+      if (c.isMesh) {
+        c.castShadow = true;
+        c.receiveShadow = true;
+        // Fix FBX materials — assign proper colors
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        mats.forEach(mat => {
+          const name = (mat.name || c.name || '').toLowerCase();
+          const isTrunk = name.includes('bark') || name.includes('trunk') || name.includes('wood') || name.includes('branch') || name.includes('stem');
+          const isLeaf = name.includes('leaf') || name.includes('leaves') || name.includes('crown') || name.includes('foliage') || name.includes('canopy') || name.includes('green');
+          if (isTrunk) {
+            mat.color.set(0x8B6914);
+          } else if (isLeaf) {
+            mat.color.set(0x4a9e2f);
+          } else {
+            // Heuristic: compute bounding box — if geometry center Y is high, it's crown
+            if (c.geometry) {
+              c.geometry.computeBoundingBox();
+              const bb = c.geometry.boundingBox;
+              if (bb) {
+                const centerY = (bb.min.y + bb.max.y) / 2;
+                const height = bb.max.y - bb.min.y;
+                if (centerY > height * 0.3) {
+                  mat.color.set(0x4a9e2f); // crown green
+                } else {
+                  mat.color.set(0x8B6914); // trunk brown
+                }
+              } else {
+                mat.color.set(0x4a9e2f); // default to green
+              }
+            } else {
+              mat.color.set(0x4a9e2f);
+            }
+          }
+          mat.needsUpdate = true;
+        });
+      }
+    });
+
+    for (let i = 0; i < count; i++) {
+      const tree = srcFBX.clone();
+
+      // Random side: left or right of track
+      const side = i < count / 2 ? 1 : -1;
+      const x = side * (trackEdge + Math.random() * (maxX - trackEdge));
+      const z = minZ + Math.random() * (maxZ - minZ);
+
+      tree.position.set(x, 0, z);
+      // Random rotation for variety
+      tree.rotation.y = Math.random() * Math.PI * 2;
+      // Random scale variation (80% to 130% of base)
+      const s = treeScale * (0.8 + Math.random() * 0.5);
+      tree.scale.setScalar(s);
+
+      this.scene.add(tree);
+    }
+  }
+
   // --- FBX loading ---
   async loadModels(onProgress){
     const loader=new FBXLoader();
     const base='characters/FBX%20Files/';
     const load = n => new Promise((res,rej)=> loader.load(base+encodeURIComponent(n),res,undefined,rej));
 
-    let done=0; const total=6;
+    let done=0; const total=7;
     const tick=label=>{ done++; if(onProgress) onProgress(done/total,label); };
 
     const playerFBX = await load('MrFarts.fbx');         tick('MrFarts loaded');
@@ -566,6 +649,7 @@ class Scene3D {
     const grannyFBX = await load('Grandma.fbx');         tick('Grandma loaded');
     const suitFBX   = await load('Spacesuit.fbx');       tick('Spacesuit loaded');
     const pirateFBX = await load('Pirate.fbx');          tick('Pirate loaded');
+    const treeFBX = await loader.loadAsync('treeModels/tree.fbx'); tick('Trees loaded');
 
     // --- Player (MrFarts) ---
     this.playerMesh=this._prep(playerFBX,CFG.MODEL_SCALE,true);
@@ -587,6 +671,9 @@ class Scene3D {
     if(this.idleClip){ const a=gm.clipAction(this.idleClip); a.play(); }
     this.mixers.push(gm);
     this._label(this.grannyMesh,'GRANNY FARTS','#44ff44',6);
+
+    // --- Scatter trees on grass alongside track ---
+    this._scatterTrees(treeFBX);
 
     // Store FBX sources for later — meshes created per match in buildAIMeshes()
     this._suitFBX=suitFBX;
@@ -659,7 +746,6 @@ class Scene3D {
       const t=game.light.isTurning;
       // turning = transitional amber tint
       const bgClr=r?0xf0b0b0:t?0xe8d8a0:0x87ceeb;
-      this.scene.background.set(bgClr);
       this.scene.fog.color.set(bgClr);
       this.dirLight.color.set(r?0xffcccc:t?0xffeecc:0xffffff);
       this.dirLight.intensity=r?1.8:2.2;
@@ -690,6 +776,21 @@ class Scene3D {
     if (game.grannyFarts&&this.grannyMesh){
       this.grannyMesh.position.set(game.grannyFarts.x,0,game.grannyFarts.z);
       this.grannyMesh.rotation.y=game.grannyFarts.currentRotY;
+    }
+
+    // Orb state + pulse
+    if (this.orbGroup) {
+      this.orbTime += dt;
+      const isRed = game.light?.isRed;
+      const isTurning = game.light?.isTurning;
+      const clr = isRed ? 0xff0000 : isTurning ? 0xff4400 : 0x8B4513;
+      this.orbMat.color.set(clr);
+      this.orbMat.emissive.set(clr);
+      this.orbLight.color.set(clr);
+      const pulse = 1.0 + 0.15 * Math.sin(this.orbTime * (isRed ? 8 : 3));
+      this.orbMesh.scale.setScalar(pulse);
+      this.orbMat.emissiveIntensity = isRed ? 2.5 * pulse : 1.5 * pulse;
+      this.orbLight.intensity = isRed ? 5 * pulse : 3 * pulse;
     }
 
     // AI meshes
@@ -763,8 +864,11 @@ class Game {
     this.hudCanvas=document.getElementById('hudCanvas');
     this.ctx=this.hudCanvas.getContext('2d');
     this.input=new Input(); this.audio=new GameAudio(); this.scene3d=null;
-    this.headerEl=document.getElementById('light-header');
     this.timerEl=document.getElementById('game-timer');
+    this.progressImg = new Image();
+    this.progressImg.src = 'UI/charactersUI/granny.png';
+    this.progressImgReady = false;
+    this.progressImg.onload = () => { this.progressImgReady = true; };
 
     this.state='loading'; this.matchTmr=0; this.cdTmr=0; this.cdNum=3; this.goReason='';
     this.msg=''; this.msgTmr=0; this.flashClr=''; this.flashTmr=0;
@@ -801,9 +905,14 @@ class Game {
     for(let i=0;i<5;i++) types.push('steady');
     for(let i=0;i<8;i++) types.push('pirate');
     for(let i=types.length-1;i>0;i--){ const j=randI(0,i);[types[i],types[j]]=[types[j],types[i]]; }
+    const count = types.length;
+    const margin = 4;
+    const usableW = CFG.FIELD_W - margin * 2;
+    const laneGap = usableW / (count - 1);
     return types.map((t,i)=>{
-      const cols=10, gap=(CFG.FIELD_W-10)/(cols-1);
-      const ai=new AIEntity(-CFG.FIELD_W/2+5+(i%cols)*gap, -2-Math.floor(i/cols)*5, t, `Bot-${i+1}`);
+      const laneX = -CFG.FIELD_W / 2 + margin + i * laneGap;
+      const staggerZ = -2 - (i % 3) * 4;
+      const ai = new AIEntity(laneX, staggerZ, t, `Bot-${i+1}`);
       if(t==='pirate') ai.brain=new PirateBrain(ai);
       return ai;
     });
@@ -815,7 +924,6 @@ class Game {
     this.player=new Player(CFG, lerp, clamp, targetSpeed, speedTier); this.grannyFarts=new GrannyFarts(); this.ai=this._makeAI();
     if(this.scene3d) this.scene3d.buildAIMeshes(this.ai);
     this.light=new LightSystem(); this.light.onSwitch=s=>this._onLight(s);
-    if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
     this.audio.tick();
   }
   gameOver(r){ this.state='gameover'; this.goReason=r; this._showMsg(r,99); r.includes('WIN')?this.audio.go():this.audio.blast(); }
@@ -823,16 +931,13 @@ class Game {
   _onLight(s){
     if(s==='brown'){
       this._showMsg('BROWN LIGHT',1); this._flash('#8B4513',.3); this.audio.brown();
-      if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
     }
     else if(s==='turning'){
       // Granny is turning — show warning, no sound yet
       this._showMsg('👀 TURNING…',0.8);
-      if(this.headerEl){ this.headerEl.className='red'; this.headerEl.textContent='● TURNING…'; }
     }
     else if(s==='red'){
       this._showMsg('RED LIGHT!',1); this._flash('#ff0000',.35); this.audio.red();
-      if(this.headerEl){ this.headerEl.className='red'; this.headerEl.textContent='● RED LIGHT'; }
     }
     else if(s==='fake'){ this._flash('#ffaa00',.2); }
   }
@@ -1014,10 +1119,10 @@ class Game {
     if(this.scene3d&&this.state!=='loading'){ this.scene3d.sync(this,dt); this.scene3d.render(); }
 
     switch(this.state){
-      case 'menu': this._rMenu(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; if(this.timerEl) this.timerEl.style.display='none'; break;
+      case 'menu': this._rMenu(ctx,W,H); if(this.timerEl) this.timerEl.style.display='none'; break;
       case 'countdown': this._rHUD(ctx,W,H); this._rCD(ctx,W,H); break;
       case 'playing': this._rHUD(ctx,W,H); break;
-      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; if(this.timerEl) this.timerEl.style.display='none'; break;
+      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); if(this.timerEl) this.timerEl.style.display='none'; break;
     }
 
     // flash
@@ -1096,17 +1201,45 @@ class Game {
     [13,33,66].forEach(t=>{ const ty=by+bh-(t/CFG.MAX_SPEED)*bh; ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bx,ty); ctx.lineTo(bx+bw,ty); ctx.stroke(); });
     ctx.fillStyle=TIER_CLR[tier]; ctx.font=`bold ${Math.round(12*sc)}px "SoupOfJustice",monospace`; ctx.textAlign='center';
     ctx.fillText(TIER_NAME[tier],bx+bw/2,by-8*sc);
-    // progress bar — responsive
-    const pw=Math.round(22*sc),ph2=bh;
-    const px=W-Math.round(42*sc),py=by,prog=clamp(this.player.progress,0,1);
-    ctx.fillStyle='rgba(0,0,0,0.7)'; this._rr(ctx,px-4*sc,py-24*sc,pw+12*sc,ph2+34*sc,6*sc); ctx.fill();
-    ctx.fillStyle='#2a2a2a'; ctx.fillRect(px,py,pw,ph2);
-    ctx.fillStyle='#ffcc00'; ctx.fillRect(px,py+ph2-prog*ph2,pw,prog*ph2);
-    const zy=py+ph2-(CFG.FINISH_ZONE_START/CFG.FIELD_L)*ph2;
-    ctx.strokeStyle='#ff8800'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,zy); ctx.lineTo(px+pw,zy); ctx.stroke();
-    ctx.fillStyle='#4488ff'; ctx.beginPath();
-    const ary=py+ph2-prog*ph2; ctx.moveTo(px-7*sc,ary); ctx.lineTo(px,ary-6*sc); ctx.lineTo(px,ary+6*sc); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#888'; ctx.font=`${Math.round(11*sc)}px "SoupOfJustice",monospace`; ctx.textAlign='center'; ctx.fillText('DIST',px+pw/2,py-8*sc);
+    // progress bar — horizontal, top-left with character PNG
+    const barMargin = Math.round(16 * sc);
+    const barY = Math.round(12 * sc);
+    const barW = Math.round(Math.min(260, W * 0.35) * sc);
+    const barH = Math.round(14 * sc);
+    const prog = clamp(this.player.progress, 0, 1);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    this._rr(ctx, barMargin - 4*sc, barY - 4*sc, barW + 8*sc, barH + 8*sc, 6*sc);
+    ctx.fill();
+
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(barMargin, barY, barW, barH);
+
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillRect(barMargin, barY, barW * prog, barH);
+
+    // Finish zone marker
+    const fzX = barMargin + (CFG.FINISH_ZONE_START / CFG.FIELD_L) * barW;
+    ctx.strokeStyle = '#ff8800'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(fzX, barY - 2); ctx.lineTo(fzX, barY + barH + 2); ctx.stroke();
+
+    // Character PNG sliding along bar
+    const imgSize = Math.round(28 * sc);
+    const imgX = barMargin + prog * barW - imgSize / 2;
+    const imgY = barY + barH / 2 - imgSize / 2;
+    if (this.progressImgReady) {
+      ctx.drawImage(this.progressImg, imgX, imgY - 2, imgSize, imgSize);
+    } else {
+      ctx.fillStyle = '#4488ff';
+      ctx.beginPath();
+      ctx.arc(imgX + imgSize/2, imgY + imgSize/2, imgSize/3, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = `${Math.round(10*sc)}px "SoupOfJustice",monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText('PROGRESS', barMargin, barY + barH + 14*sc);
   }
 
   _rGO(ctx,W,H){
@@ -1114,8 +1247,16 @@ class Game {
     ctx.fillStyle='rgba(0,0,0,0.78)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
     const w=this.goReason.includes('WIN');
     ctx.shadowColor=w?'#ffcc00':'#ff0000'; ctx.shadowBlur=25*sc;
-    ctx.fillStyle=w?'#ffcc00':'#ff4444'; ctx.font=`bold ${Math.round(Math.min(60,W*.08)*sc)}px "SoupOfJustice","Courier New",monospace`;
-    ctx.fillText(this.goReason,W/2,H/2-20*sc); ctx.shadowBlur=0;
+    ctx.fillStyle=w?'#ffcc00':'#ff4444';
+    let goFontSize = Math.round(Math.min(60, W * 0.08) * sc);
+    ctx.font = `bold ${goFontSize}px "SoupOfJustice","Courier New",monospace`;
+    // Shrink font until text fits with padding
+    const maxTextW = W * 0.9;
+    while (ctx.measureText(this.goReason).width > maxTextW && goFontSize > 16) {
+      goFontSize -= 2;
+      ctx.font = `bold ${goFontSize}px "SoupOfJustice","Courier New",monospace`;
+    }
+    ctx.fillText(this.goReason, W/2, H/2 - 20*sc); ctx.shadowBlur=0;
     const isMobile = 'ontouchstart' in window;
     ctx.fillStyle='#aaa'; ctx.font=`${Math.round(20*sc)}px "SoupOfJustice",monospace`; ctx.fillText(isMobile ? '[ TAP to continue ]' : '[ Press ENTER ]',W/2,H/2+40*sc);
     const remaining=Math.max(0, CFG.TIMEOUT - this.matchTmr);
