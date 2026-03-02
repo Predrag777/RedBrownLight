@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { PirateBrain } from './characterBrain/pirate.js';
 import { Player } from './characterBrain/myPlayer.js';
-import { RapperBrain } from './characterBrain/rapper.js';
+import { SpacesuitBrain } from './characterBrain/spacesuit.js';
 import { ZombieBrain } from './characterBrain/zombie.js';
 import { MariachiBrain } from './characterBrain/mariachi.js';
 
@@ -650,7 +650,7 @@ class Scene3D {
     const runFBX    = await load('MrFarts Running.fbx'); this.runClip=runFBX.animations[0]||null;    tick('Run anim loaded');
     const grannyFBX = await load('Grandma.fbx');         tick('Grandma loaded');
     const pirateFBX = await load('Pirate.fbx');          tick('Pirate loaded');
-    const rapperFBX = await load('Rapper.fbx');           tick('Rapper loaded');
+    const suitFBX = await load('Spacesuit.fbx');          tick('Spacesuit loaded');
     const zombieFBX = await load('Zombie.fbx');            tick('Zombie loaded');
     const mariachiFBX = await load('Mariachi.fbx');        tick('Mariachi loaded');
     const treeFBX = await loader.loadAsync('treeModels/tree.fbx'); tick('Trees loaded');
@@ -681,7 +681,7 @@ class Scene3D {
 
     // Store FBX sources for later — meshes created per match in buildAIMeshes()
     this._pirateFBX=pirateFBX;
-    this._rapperFBX=rapperFBX;
+    this._suitFBX=suitFBX;
     this._zombieFBX=zombieFBX;
     this._mariachiFBX=mariachiFBX;
     this.aiMeshes=[];
@@ -705,7 +705,7 @@ class Scene3D {
       let src;
       switch(aiList[i].type){
         case 'pirate': src=this._pirateFBX; break;
-        case 'rapper': src=this._rapperFBX; break;
+        case 'spacesuit': src=this._suitFBX; break;
         case 'zombie': src=this._zombieFBX; break;
         case 'mariachi': src=this._mariachiFBX; break;
         default: src=this._pirateFBX; break;
@@ -915,21 +915,23 @@ class Game {
   }
 
   _makeAI(){
-    const types=[];
-    for(let i=0;i<4;i++) types.push('pirate');
-    for(let i=0;i<4;i++) types.push('rapper');
-    for(let i=0;i<4;i++) types.push('zombie');
-    for(let i=0;i<4;i++) types.push('mariachi');
-    // Shuffle
-    for(let i=types.length-1;i>0;i--){ const j=randI(0,i);[types[i],types[j]]=[types[j],types[i]]; }
+    // Pool of available types (no rapper)
+    const pool = ['pirate', 'zombie', 'spacesuit', 'mariachi'];
+    // Pick 3 random types (can repeat or not — shuffle pool, take first 3)
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = randI(0, i);
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const types = pool.slice(0, 3);
 
-    const count = types.length; // 16
-    const margin = 4;
-    const usableW = CFG.FIELD_W - margin * 2; // 72
-    const totalSlots = count + 1; // 17 (16 bots + 1 player gap)
+    // 3 bots: evenly spread across track width, avoid player at x=0
+    const count = types.length; // 3
+    const margin = 6;
+    const usableW = CFG.FIELD_W - margin * 2; // 68
+    const totalSlots = count + 1; // 4 (3 bots + 1 player gap)
     const slotW = usableW / totalSlots;
 
-    // Build 17 evenly-spaced X slots
+    // Build 4 evenly-spaced X slots
     const allSlots = [];
     for (let s = 0; s < totalSlots; s++) {
       allSlots.push(-usableW / 2 + (s + 0.5) * slotW);
@@ -939,16 +941,16 @@ class Game {
     for (let s = 1; s < allSlots.length; s++) {
       if (Math.abs(allSlots[s]) < Math.abs(allSlots[closestIdx])) closestIdx = s;
     }
-    allSlots.splice(closestIdx, 1); // now 16 slots
+    allSlots.splice(closestIdx, 1); // now 3 slots
 
     return types.map((t, i) => {
       const laneX = allSlots[i];
-      const laneZ = (i % 2 === 0) ? -3 : -9; // stagger into 2 rows
+      const laneZ = -3;
       const ai = new AIEntity(laneX, laneZ, t, `Bot-${i + 1}`);
-      if(t==='pirate') ai.brain=new PirateBrain(ai);
-      else if(t==='rapper') ai.brain=new RapperBrain(ai);
-      else if(t==='zombie') ai.brain=new ZombieBrain(ai);
-      else if(t==='mariachi') ai.brain=new MariachiBrain(ai);
+      if (t === 'pirate') ai.brain = new PirateBrain(ai);
+      else if (t === 'spacesuit') ai.brain = new SpacesuitBrain(ai);
+      else if (t === 'zombie') ai.brain = new ZombieBrain(ai);
+      else if (t === 'mariachi') ai.brain = new MariachiBrain(ai);
       return ai;
     });
   }
