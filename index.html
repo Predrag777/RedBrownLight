@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>RED LIGHT… BROWN LIGHT</title>
   <link rel="stylesheet" href="style/main.css">
   <script type="importmap">
@@ -18,6 +18,10 @@
   <div id="game-container">
     <div id="light-header" class="brown">● BROWN LIGHT</div>
     <canvas id="hudCanvas"></canvas>
+    <!-- Mobile touch controls -->
+    <div id="touch-left" class="touch-zone"></div>
+    <div id="touch-right" class="touch-zone"></div>
+    <div id="touch-fwd" class="touch-zone"></div>
     <div id="loading-screen">
       <div class="load-inner">
         <h1>RED LIGHT… <span class="brown">BROWN LIGHT</span></h1>

@@ -15,6 +15,8 @@ html, body {
   overflow: hidden;
   background: #0d0907;
   font-family: "Courier New", Courier, monospace;
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 #game-container {
@@ -44,13 +46,13 @@ html, body {
   position: absolute;
   top: 0; left: 0; right: 0;
   text-align: center;
-  font-size: 32px;
+  font-size: clamp(18px, 4vw, 32px);
   font-weight: bold;
   font-family: "Courier New", Courier, monospace;
-  padding: 12px 0;
+  padding: clamp(6px, 1.5vw, 12px) 0;
   z-index: 20;
   pointer-events: none;
-  letter-spacing: 3px;
+  letter-spacing: clamp(1px, 0.3vw, 3px);
   text-transform: uppercase;
   transition: background 0.3s, color 0.3s, text-shadow 0.3s;
 }
@@ -115,4 +117,35 @@ html, body {
   border-radius: 6px;
   transition: width 0.3s ease;
 }
-#load-text { color: #888; font-size: 14px; }
+#load-text { color: #888; font-size: clamp(11px, 2vw, 14px); }
+
+/* ===== Mobile Touch Controls ===== */
+.touch-zone {
+  display: none;
+  position: absolute;
+  z-index: 15;
+  pointer-events: auto;
+  opacity: 0;
+}
+@media (hover: none) and (pointer: coarse) {
+  .touch-zone { display: block; }
+  #touch-fwd {
+    bottom: 0; left: 20%; right: 20%; height: 55%;
+  }
+  #touch-left {
+    bottom: 0; left: 0; width: 20%; height: 55%;
+  }
+  #touch-right {
+    bottom: 0; right: 0; width: 20%; height: 55%;
+  }
+}
+
+/* ===== Mobile responsive ===== */
+@media (max-width: 600px) {
+  .load-inner h1 {
+    font-size: clamp(18px, 5vw, 28px);
+  }
+  .load-bar-bg {
+    width: clamp(180px, 70vw, 320px);
+  }
+}

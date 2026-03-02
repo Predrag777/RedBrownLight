@@ -65,14 +65,38 @@ const TIER_NAME = ['CRAWL','JOG','SPRINT','DANGER!'];
 class Input {
   constructor() {
     this.k = {};
+    this.touchFwd = false;
+    this.touchLeft = false;
+    this.touchRight = false;
+    this.touchEnter = false;
     window.addEventListener('keydown', e => { this.k[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
     window.addEventListener('keyup',   e => { this.k[e.code] = false; });
+    this._initTouch();
   }
-  get fwd()   { return !!(this.k.KeyW || this.k.ArrowUp || this.k.Space); }
-  get left()  { return !!(this.k.KeyA || this.k.ArrowLeft); }
-  get right() { return !!(this.k.KeyD || this.k.ArrowRight); }
-  get enter() { return !!this.k.Enter; }
-  eatEnter()  { this.k.Enter = false; }
+  _initTouch() {
+    const fwd = document.getElementById('touch-fwd');
+    const left = document.getElementById('touch-left');
+    const right = document.getElementById('touch-right');
+    if (!fwd) return;
+    const on = (el, flag) => {
+      el.addEventListener('touchstart', e => { e.preventDefault(); this[flag] = true; }, { passive: false });
+      el.addEventListener('touchend',   e => { e.preventDefault(); this[flag] = false; }, { passive: false });
+      el.addEventListener('touchcancel',e => { this[flag] = false; });
+    };
+    on(fwd, 'touchFwd');
+    on(left, 'touchLeft');
+    on(right, 'touchRight');
+    // Tap anywhere during menu/gameover = enter
+    document.addEventListener('touchstart', e => {
+      this.touchEnter = true;
+      setTimeout(() => { this.touchEnter = false; }, 100);
+    }, { passive: true });
+  }
+  get fwd()   { return !!(this.k.KeyW || this.k.ArrowUp || this.k.Space || this.touchFwd); }
+  get left()  { return !!(this.k.KeyA || this.k.ArrowLeft || this.touchLeft); }
+  get right() { return !!(this.k.KeyD || this.k.ArrowRight || this.touchRight); }
+  get enter() { return !!(this.k.Enter || this.touchEnter); }
+  eatEnter()  { this.k.Enter = false; this.touchEnter = false; }
 }
 
 // ======================== AUDIO ======================================
@@ -218,7 +242,7 @@ class Scene3D {
 
     // renderer
     this.renderer=new THREE.WebGLRenderer({antialias:true});
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
     this.renderer.shadowMap.enabled=true;
     this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -505,6 +529,7 @@ class Scene3D {
   _onResize(){
     this.camera.aspect=window.innerWidth/window.innerHeight;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
   }
 }
@@ -528,7 +553,16 @@ class Game {
     this._resizeHud();
     window.addEventListener('resize',()=>this._resizeHud());
   }
-  _resizeHud(){ this.hudCanvas.width=window.innerWidth; this.hudCanvas.height=window.innerHeight; this.W=this.hudCanvas.width; this.H=this.hudCanvas.height; }
+  _resizeHud(){
+    const dpr = Math.min(window.devicePixelRatio, 3);
+    this.hudCanvas.width = window.innerWidth * dpr;
+    this.hudCanvas.height = window.innerHeight * dpr;
+    this.hudCanvas.style.width = window.innerWidth + 'px';
+    this.hudCanvas.style.height = window.innerHeight + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.W = window.innerWidth;
+    this.H = window.innerHeight;
+  }
 
   async init(){
     const bar=document.getElementById('load-bar'), txt=document.getElementById('load-text');
@@ -654,75 +688,90 @@ class Game {
     // centre message
     if(this.msgTmr>0&&(this.state==='playing'||this.state==='countdown')){
       ctx.globalAlpha=Math.min(1,this.msgTmr*2); ctx.textAlign='center';
-      ctx.font=`bold ${Math.min(48,W*.05)}px "Courier New",monospace`;
+      const scMsg=Math.max(0.5, Math.min(W,H)/500);
+      ctx.font=`bold ${Math.round(Math.min(48,W*.07)*scMsg)}px "Courier New",monospace`;
       const c=this.msg.includes('RED')?'#ff3333':this.msg.includes('BROWN')?'#cc8844':this.msg.includes('BLAST')?'#44ff44':'#fff';
-      ctx.shadowColor='#000'; ctx.shadowBlur=12; ctx.fillStyle=c;
+      ctx.shadowColor='#000'; ctx.shadowBlur=12*scMsg; ctx.fillStyle=c;
       ctx.fillText(this.msg,W/2,H/2-H*.1); ctx.shadowBlur=0; ctx.globalAlpha=1;
     }
   }
 
   _rMenu(ctx,W,H){
+    const sc=Math.max(0.5, Math.min(W,H)/500);
     ctx.fillStyle='rgba(0,0,0,0.82)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
-    ctx.shadowColor='#ff3333'; ctx.shadowBlur=20; ctx.fillStyle='#ff4444';
-    ctx.font=`bold ${Math.min(64,W*.06)}px "Courier New",monospace`;
-    ctx.fillText('RED LIGHT…',W/2,H/2-80);
+    ctx.shadowColor='#ff3333'; ctx.shadowBlur=20*sc; ctx.fillStyle='#ff4444';
+    ctx.font=`bold ${Math.round(Math.min(64,W*.08)*sc)}px "Courier New",monospace`;
+    ctx.fillText('RED LIGHT…',W/2,H/2-80*sc);
     ctx.shadowColor='#8B4513'; ctx.fillStyle='#AA6633';
-    ctx.fillText('BROWN LIGHT',W/2,H/2-20); ctx.shadowBlur=0;
-    ctx.fillStyle='#44cc44'; ctx.font=`${Math.min(20,W*.02)}px monospace`;
-    ctx.fillText('A Top-Down Mud Chaos Runner',W/2,H/2+30);
-    ctx.fillStyle='#aaa'; ctx.font=`${Math.min(22,W*.022)}px monospace`;
-    ctx.fillText('[ Press ENTER to start ]',W/2,H/2+80);
-    ctx.fillStyle='#666'; ctx.font=`${Math.min(15,W*.015)}px monospace`;
-    ctx.fillText('W / ↑ / SPACE = Run Forward       A D / ← → = Dodge',W/2,H/2+130);
-    ctx.fillText('HOLD longer → faster → harder to stop!',W/2,H/2+155);
+    ctx.fillText('BROWN LIGHT',W/2,H/2-20*sc); ctx.shadowBlur=0;
+    ctx.fillStyle='#44cc44'; ctx.font=`${Math.round(Math.min(20,W*.03)*sc)}px monospace`;
+    ctx.fillText('A Top-Down Mud Chaos Runner',W/2,H/2+30*sc);
+    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(Math.min(22,W*.035)*sc)}px monospace`;
+    const isMobile = 'ontouchstart' in window;
+    ctx.fillText(isMobile ? '[ TAP to start ]' : '[ Press ENTER to start ]',W/2,H/2+80*sc);
+    ctx.fillStyle='#666'; ctx.font=`${Math.round(Math.min(15,W*.025)*sc)}px monospace`;
+    if (isMobile) {
+      ctx.fillText('HOLD center = Run Forward',W/2,H/2+130*sc);
+      ctx.fillText('HOLD left/right edges = Dodge',W/2,H/2+155*sc);
+    } else {
+      ctx.fillText('W / ↑ / SPACE = Run Forward       A D / ← → = Dodge',W/2,H/2+130*sc);
+      ctx.fillText('HOLD longer → faster → harder to stop!',W/2,H/2+155*sc);
+    }
   }
 
   _rCD(ctx,W,H){
+    const sc=Math.max(0.5, Math.min(W,H)/500);
     ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
-    ctx.fillStyle='#fff'; ctx.font=`bold ${Math.min(150,W*.15)}px "Courier New",monospace`;
-    ctx.fillText(String(Math.max(1,Math.ceil(CFG.COUNTDOWN-this.cdTmr))),W/2,H/2+50);
-    ctx.font=`${Math.min(24,W*.025)}px monospace`; ctx.fillStyle='#888';
-    ctx.fillText('GET READY…',W/2,H/2+100);
+    ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(Math.min(150,W*.18)*sc)}px "Courier New",monospace`;
+    ctx.fillText(String(Math.max(1,Math.ceil(CFG.COUNTDOWN-this.cdTmr))),W/2,H/2+50*sc);
+    ctx.font=`${Math.round(Math.min(24,W*.04)*sc)}px monospace`; ctx.fillStyle='#888';
+    ctx.fillText('GET READY…',W/2,H/2+100*sc);
   }
 
   _rHUD(ctx,W,H){
     if(!this.light||!this.player) return;
     const isR=this.light.isRed;
+    const sc=Math.max(0.5, Math.min(W,H)/500); // responsive scale
     // timer — top right (below header)
     const m=Math.floor(this.matchTmr/60),s=Math.floor(this.matchTmr%60);
-    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,W-110,60,100,36,6); ctx.fill();
-    ctx.fillStyle=this.matchTmr>100?'#ff4444':'#ddd'; ctx.font='16px monospace'; ctx.textAlign='right';
-    ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,W-18,84);
-    // speed bar
-    const bx=16,by=H/2-120,bw=22,bh=240;
+    const timerW=Math.round(110*sc), timerH=Math.round(38*sc), timerX=W-timerW-Math.round(12*sc), timerY=Math.round(48*sc);
+    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,timerX,timerY,timerW,timerH,6*sc); ctx.fill();
+    ctx.fillStyle=this.matchTmr>100?'#ff4444':'#ddd'; ctx.font=`bold ${Math.round(18*sc)}px monospace`; ctx.textAlign='right';
+    ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,timerX+timerW-Math.round(8*sc),timerY+timerH*0.7);
+    // speed bar — responsive
+    const bw=Math.round(26*sc),bh=Math.round(260*sc);
+    const bx=Math.round(16*sc),by=Math.round(H/2-bh/2);
     const ratio=clamp(this.player.speed/CFG.MAX_SPEED,0,1),tier=this.player.tier;
-    ctx.fillStyle='rgba(0,0,0,0.7)'; this._rr(ctx,bx-4,by-22,bw+8,bh+30,6); ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,0.7)'; this._rr(ctx,bx-4*sc,by-24*sc,bw+10*sc,bh+34*sc,6*sc); ctx.fill();
     ctx.fillStyle='#2a2a2a'; ctx.fillRect(bx,by,bw,bh);
     ctx.fillStyle=TIER_CLR[tier]; ctx.fillRect(bx,by+bh-ratio*bh,bw,ratio*bh);
     [13,33,66].forEach(t=>{ const ty=by+bh-(t/CFG.MAX_SPEED)*bh; ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bx,ty); ctx.lineTo(bx+bw,ty); ctx.stroke(); });
-    ctx.fillStyle=TIER_CLR[tier]; ctx.font='bold 10px monospace'; ctx.textAlign='center';
-    ctx.fillText(TIER_NAME[tier],bx+bw/2,by-6);
-    // progress bar
-    const px=W-38,py=by,ph=bh,prog=clamp(this.player.progress,0,1);
-    ctx.fillStyle='rgba(0,0,0,0.7)'; this._rr(ctx,px-4,py-22,26,ph+30,6); ctx.fill();
-    ctx.fillStyle='#2a2a2a'; ctx.fillRect(px,py,18,ph);
-    ctx.fillStyle='#ffcc00'; ctx.fillRect(px,py+ph-prog*ph,18,prog*ph);
-    const zy=py+ph-(CFG.FINISH_ZONE_START/CFG.FIELD_L)*ph;
-    ctx.strokeStyle='#ff8800'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,zy); ctx.lineTo(px+18,zy); ctx.stroke();
+    ctx.fillStyle=TIER_CLR[tier]; ctx.font=`bold ${Math.round(12*sc)}px monospace`; ctx.textAlign='center';
+    ctx.fillText(TIER_NAME[tier],bx+bw/2,by-8*sc);
+    // progress bar — responsive
+    const pw=Math.round(22*sc),ph2=bh;
+    const px=W-Math.round(42*sc),py=by,prog=clamp(this.player.progress,0,1);
+    ctx.fillStyle='rgba(0,0,0,0.7)'; this._rr(ctx,px-4*sc,py-24*sc,pw+12*sc,ph2+34*sc,6*sc); ctx.fill();
+    ctx.fillStyle='#2a2a2a'; ctx.fillRect(px,py,pw,ph2);
+    ctx.fillStyle='#ffcc00'; ctx.fillRect(px,py+ph2-prog*ph2,pw,prog*ph2);
+    const zy=py+ph2-(CFG.FINISH_ZONE_START/CFG.FIELD_L)*ph2;
+    ctx.strokeStyle='#ff8800'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,zy); ctx.lineTo(px+pw,zy); ctx.stroke();
     ctx.fillStyle='#4488ff'; ctx.beginPath();
-    const ary=py+ph-prog*ph; ctx.moveTo(px-6,ary); ctx.lineTo(px,ary-5); ctx.lineTo(px,ary+5); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#888'; ctx.font='9px monospace'; ctx.textAlign='center'; ctx.fillText('DIST',px+9,py-6);
+    const ary=py+ph2-prog*ph2; ctx.moveTo(px-7*sc,ary); ctx.lineTo(px,ary-6*sc); ctx.lineTo(px,ary+6*sc); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#888'; ctx.font=`${Math.round(11*sc)}px monospace`; ctx.textAlign='center'; ctx.fillText('DIST',px+pw/2,py-8*sc);
   }
 
   _rGO(ctx,W,H){
+    const sc=Math.max(0.5, Math.min(W,H)/500);
     ctx.fillStyle='rgba(0,0,0,0.78)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
     const w=this.goReason.includes('WIN');
-    ctx.shadowColor=w?'#ffcc00':'#ff0000'; ctx.shadowBlur=25;
-    ctx.fillStyle=w?'#ffcc00':'#ff4444'; ctx.font=`bold ${Math.min(60,W*.06)}px "Courier New",monospace`;
-    ctx.fillText(this.goReason,W/2,H/2-20); ctx.shadowBlur=0;
-    ctx.fillStyle='#aaa'; ctx.font='20px monospace'; ctx.fillText('[ Press ENTER ]',W/2,H/2+40);
+    ctx.shadowColor=w?'#ffcc00':'#ff0000'; ctx.shadowBlur=25*sc;
+    ctx.fillStyle=w?'#ffcc00':'#ff4444'; ctx.font=`bold ${Math.round(Math.min(60,W*.08)*sc)}px "Courier New",monospace`;
+    ctx.fillText(this.goReason,W/2,H/2-20*sc); ctx.shadowBlur=0;
+    const isMobile = 'ontouchstart' in window;
+    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(20*sc)}px monospace`; ctx.fillText(isMobile ? '[ TAP to continue ]' : '[ Press ENTER ]',W/2,H/2+40*sc);
     const m=Math.floor(this.matchTmr/60),s=Math.floor(this.matchTmr%60);
-    ctx.fillStyle='#888'; ctx.font='16px monospace'; ctx.fillText(`Time: ${m}:${String(s).padStart(2,'0')}`,W/2,H/2+70);
+    ctx.fillStyle='#888'; ctx.font=`${Math.round(16*sc)}px monospace`; ctx.fillText(`Time: ${m}:${String(s).padStart(2,'0')}`,W/2,H/2+70*sc);
   }
 
   _rr(ctx,x,y,w,h,r){
