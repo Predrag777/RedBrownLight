@@ -194,52 +194,20 @@ class AIEntity {
   update(dt, light, player, allAI, myIdx) {
     if (this.blasted) return;
 
-    // Apply push velocity decay
+    // --- Brain-controlled AI (pirate etc.) handles EVERYTHING ---
+    if (this.brain) {
+      this.brain.update(dt, light, player, allAI, myIdx, CFG, targetSpeed, clamp, lerp);
+      return;
+    }
+
+    // --- No brain script — just apply push decay (can be bumped around) ---
     if (Math.abs(this.vx) > 0.1 || Math.abs(this.vz) > 0.1) {
       this.x += this.vx * dt;
       this.z += this.vz * dt;
       this.vx *= (1 - CFG.PUSH_RECOVERY * dt);
       this.vz *= (1 - CFG.PUSH_RECOVERY * dt);
     }
-
-    // Stun
-    if (this.stunTmr > 0) {
-      this.stunTmr -= dt;
-      this.speed = Math.max(0, this.speed - 60 * dt);
-      return;
-    }
-
-    // --- Pirate brain ---
-    if (this.brain) {
-      this.brain.update(dt, light, player, allAI, myIdx, CFG, targetSpeed, clamp, lerp);
-      return;
-    }
-
-    // --- Default AI (demon/steady/bully basic movement) ---
-    const isBrown = light.isBrown || light.isTurning;
-    if (isBrown) {
-      // Vary speed by type
-      const maxHold = this.type === 'demon' ? 1.0 + Math.random() * 0.01
-        : this.type === 'bully' ? 0.7 + Math.random() * 0.01
-        : 0.5 + Math.random() * 0.01;
-      this.holdTmr = lerp(this.holdTmr, maxHold, dt * (2 + Math.random()));
-      this.speed = lerp(this.speed, targetSpeed(this.holdTmr), dt * CFG.ACCEL_LERP * 0.8);
-    } else {
-      // Brake
-      this.holdTmr = 0;
-      this.speed = Math.max(0, this.speed - CFG.BASE_DECEL * 0.7 * dt);
-    }
-
-    // Red light detection — AI also gets blasted if moving during red
-    if (light.isRed && light.canDetect && this.speed > CFG.VEL_THRESHOLD * 1.5) {
-      if (Math.random() < 0.003) { // rare — AI is usually good at stopping
-        this.blasted = true; this.speed = 0;
-      }
-    }
-
-    // Apply forward movement with small random lateral drift
-    this.z += this.speed * dt;
-    this.x += Math.sin(this.z * 0.1 + myIdx) * 0.3 * dt;
+    // No active movement — waiting for brain script
     this.x = clamp(this.x, -CFG.FIELD_W / 2 + 2, CFG.FIELD_W / 2 - 2);
     this.z = clamp(this.z, 0, CFG.FIELD_L);
   }
@@ -954,6 +922,15 @@ class Game {
         this.player.tier>=3?(this.dangerPulse+=dt*8):(this.dangerPulse*=0.9);
         this.grannyFarts.update(dt,this.light.state,{x:this.player.x,z:this.player.z},this.light.fakeActive, this.light.isTurning?this.light.turnTimer/CFG.TURN_DURATION:0);
         this.ai.forEach((a,i)=>a.update(dt, this.light, this.player, this.ai, i));
+
+        // Red light detection for ALL AI (including pirates)
+        if(this.light.isRed && this.light.canDetect){
+          for(const a of this.ai){
+            if(!a.blasted && (a.speed||0) > CFG.VEL_THRESHOLD){
+              a.blasted=true; a.speed=0;
+            }
+          }
+        }
 
         // === COLLISION SYSTEM ===
         this._resolveCollisions(dt);
