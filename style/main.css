@@ -3,6 +3,13 @@
    Three.js 3D + HUD canvas overlay
    ============================================= */
 
+@font-face {
+  font-family: 'SoupOfJustice';
+  src: url('../fonts/soupofjustice.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -14,7 +21,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: #0d0907;
-  font-family: "Courier New", Courier, monospace;
+  font-family: 'SoupOfJustice', "Courier New", Courier, monospace;
   touch-action: none;
   -webkit-touch-callout: none;
 }
@@ -48,7 +55,7 @@ html, body {
   text-align: center;
   font-size: clamp(18px, 4vw, 32px);
   font-weight: bold;
-  font-family: "Courier New", Courier, monospace;
+  font-family: 'SoupOfJustice', "Courier New", Courier, monospace;
   padding: clamp(6px, 1.5vw, 12px) 0;
   z-index: 20;
   pointer-events: none;
@@ -118,6 +125,28 @@ html, body {
   transition: width 0.3s ease;
 }
 #load-text { color: #888; font-size: clamp(11px, 2vw, 14px); }
+
+/* Centered timer with backer */
+#game-timer {
+  position: absolute;
+  top: clamp(38px, 6vw, 60px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(120px, 22vw, 200px);
+  height: clamp(48px, 8vw, 80px);
+  background: url('../UI/mainUI/timerBacker.png') center/contain no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'SoupOfJustice', "Courier New", monospace;
+  font-size: clamp(20px, 4vw, 36px);
+  font-weight: bold;
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.6);
+  letter-spacing: 2px;
+  z-index: 22;
+  pointer-events: none;
+}
 
 /* ===== Mobile Touch Controls ===== */
 .touch-zone {

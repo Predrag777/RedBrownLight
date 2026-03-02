@@ -544,6 +544,7 @@ class Game {
     this.ctx=this.hudCanvas.getContext('2d');
     this.input=new Input(); this.audio=new GameAudio(); this.scene3d=null;
     this.headerEl=document.getElementById('light-header');
+    this.timerEl=document.getElementById('game-timer');
 
     this.state='loading'; this.matchTmr=0; this.cdTmr=0; this.cdNum=3; this.goReason='';
     this.msg=''; this.msgTmr=0; this.flashClr=''; this.flashTmr=0;
@@ -668,10 +669,10 @@ class Game {
     if(this.scene3d&&this.state!=='loading'){ this.scene3d.sync(this,dt); this.scene3d.render(); }
 
     switch(this.state){
-      case 'menu': this._rMenu(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; break;
+      case 'menu': this._rMenu(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; if(this.timerEl) this.timerEl.style.display='none'; break;
       case 'countdown': this._rHUD(ctx,W,H); this._rCD(ctx,W,H); break;
       case 'playing': this._rHUD(ctx,W,H); break;
-      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; break;
+      case 'gameover': this._rHUD(ctx,W,H); this._rGO(ctx,W,H); if(this.headerEl) this.headerEl.className='hidden'; if(this.timerEl) this.timerEl.style.display='none'; break;
     }
 
     // flash
@@ -689,7 +690,7 @@ class Game {
     if(this.msgTmr>0&&(this.state==='playing'||this.state==='countdown')){
       ctx.globalAlpha=Math.min(1,this.msgTmr*2); ctx.textAlign='center';
       const scMsg=Math.max(0.5, Math.min(W,H)/500);
-      ctx.font=`bold ${Math.round(Math.min(48,W*.07)*scMsg)}px "Courier New",monospace`;
+      ctx.font=`bold ${Math.round(Math.min(48,W*.07)*scMsg)}px "SoupOfJustice","Courier New",monospace`;
       const c=this.msg.includes('RED')?'#ff3333':this.msg.includes('BROWN')?'#cc8844':this.msg.includes('BLAST')?'#44ff44':'#fff';
       ctx.shadowColor='#000'; ctx.shadowBlur=12*scMsg; ctx.fillStyle=c;
       ctx.fillText(this.msg,W/2,H/2-H*.1); ctx.shadowBlur=0; ctx.globalAlpha=1;
@@ -700,16 +701,16 @@ class Game {
     const sc=Math.max(0.5, Math.min(W,H)/500);
     ctx.fillStyle='rgba(0,0,0,0.82)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
     ctx.shadowColor='#ff3333'; ctx.shadowBlur=20*sc; ctx.fillStyle='#ff4444';
-    ctx.font=`bold ${Math.round(Math.min(64,W*.08)*sc)}px "Courier New",monospace`;
+    ctx.font=`bold ${Math.round(Math.min(64,W*.08)*sc)}px "SoupOfJustice","Courier New",monospace`;
     ctx.fillText('RED LIGHT…',W/2,H/2-80*sc);
     ctx.shadowColor='#8B4513'; ctx.fillStyle='#AA6633';
     ctx.fillText('BROWN LIGHT',W/2,H/2-20*sc); ctx.shadowBlur=0;
-    ctx.fillStyle='#44cc44'; ctx.font=`${Math.round(Math.min(20,W*.03)*sc)}px monospace`;
+    ctx.fillStyle='#44cc44'; ctx.font=`${Math.round(Math.min(20,W*.03)*sc)}px "SoupOfJustice",monospace`;
     ctx.fillText('A Top-Down Mud Chaos Runner',W/2,H/2+30*sc);
-    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(Math.min(22,W*.035)*sc)}px monospace`;
+    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(Math.min(22,W*.035)*sc)}px "SoupOfJustice",monospace`;
     const isMobile = 'ontouchstart' in window;
     ctx.fillText(isMobile ? '[ TAP to start ]' : '[ Press ENTER to start ]',W/2,H/2+80*sc);
-    ctx.fillStyle='#666'; ctx.font=`${Math.round(Math.min(15,W*.025)*sc)}px monospace`;
+    ctx.fillStyle='#666'; ctx.font=`${Math.round(Math.min(15,W*.025)*sc)}px "SoupOfJustice",monospace`;
     if (isMobile) {
       ctx.fillText('HOLD center = Run Forward',W/2,H/2+130*sc);
       ctx.fillText('HOLD left/right edges = Dodge',W/2,H/2+155*sc);
@@ -722,9 +723,9 @@ class Game {
   _rCD(ctx,W,H){
     const sc=Math.max(0.5, Math.min(W,H)/500);
     ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
-    ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(Math.min(150,W*.18)*sc)}px "Courier New",monospace`;
+    ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(Math.min(150,W*.18)*sc)}px "SoupOfJustice","Courier New",monospace`;
     ctx.fillText(String(Math.max(1,Math.ceil(CFG.COUNTDOWN-this.cdTmr))),W/2,H/2+50*sc);
-    ctx.font=`${Math.round(Math.min(24,W*.04)*sc)}px monospace`; ctx.fillStyle='#888';
+    ctx.font=`${Math.round(Math.min(24,W*.04)*sc)}px "SoupOfJustice",monospace`; ctx.fillStyle='#888';
     ctx.fillText('GET READY…',W/2,H/2+100*sc);
   }
 
@@ -732,12 +733,14 @@ class Game {
     if(!this.light||!this.player) return;
     const isR=this.light.isRed;
     const sc=Math.max(0.5, Math.min(W,H)/500); // responsive scale
-    // timer — top right (below header)
-    const m=Math.floor(this.matchTmr/60),s=Math.floor(this.matchTmr%60);
-    const timerW=Math.round(110*sc), timerH=Math.round(38*sc), timerX=W-timerW-Math.round(12*sc), timerY=Math.round(48*sc);
-    ctx.fillStyle='rgba(0,0,0,0.75)'; this._rr(ctx,timerX,timerY,timerW,timerH,6*sc); ctx.fill();
-    ctx.fillStyle=this.matchTmr>100?'#ff4444':'#ddd'; ctx.font=`bold ${Math.round(18*sc)}px monospace`; ctx.textAlign='right';
-    ctx.fillText(`${m}:${String(s).padStart(2,'0')}`,timerX+timerW-Math.round(8*sc),timerY+timerH*0.7);
+    // timer — countdown from 2:00, rendered via DOM element
+    const remaining=Math.max(0, CFG.TIMEOUT - this.matchTmr);
+    const m=Math.floor(remaining/60),s=Math.floor(remaining%60);
+    if(this.timerEl){
+      this.timerEl.textContent=`${m}:${String(s).padStart(2,'0')}`;
+      this.timerEl.style.color=remaining<=20?'#ff4444':'#ffffff';
+      this.timerEl.style.display='';
+    }
     // speed bar — responsive
     const bw=Math.round(26*sc),bh=Math.round(260*sc);
     const bx=Math.round(16*sc),by=Math.round(H/2-bh/2);
@@ -746,7 +749,7 @@ class Game {
     ctx.fillStyle='#2a2a2a'; ctx.fillRect(bx,by,bw,bh);
     ctx.fillStyle=TIER_CLR[tier]; ctx.fillRect(bx,by+bh-ratio*bh,bw,ratio*bh);
     [13,33,66].forEach(t=>{ const ty=by+bh-(t/CFG.MAX_SPEED)*bh; ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bx,ty); ctx.lineTo(bx+bw,ty); ctx.stroke(); });
-    ctx.fillStyle=TIER_CLR[tier]; ctx.font=`bold ${Math.round(12*sc)}px monospace`; ctx.textAlign='center';
+    ctx.fillStyle=TIER_CLR[tier]; ctx.font=`bold ${Math.round(12*sc)}px "SoupOfJustice",monospace`; ctx.textAlign='center';
     ctx.fillText(TIER_NAME[tier],bx+bw/2,by-8*sc);
     // progress bar — responsive
     const pw=Math.round(22*sc),ph2=bh;
@@ -758,7 +761,7 @@ class Game {
     ctx.strokeStyle='#ff8800'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,zy); ctx.lineTo(px+pw,zy); ctx.stroke();
     ctx.fillStyle='#4488ff'; ctx.beginPath();
     const ary=py+ph2-prog*ph2; ctx.moveTo(px-7*sc,ary); ctx.lineTo(px,ary-6*sc); ctx.lineTo(px,ary+6*sc); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#888'; ctx.font=`${Math.round(11*sc)}px monospace`; ctx.textAlign='center'; ctx.fillText('DIST',px+pw/2,py-8*sc);
+    ctx.fillStyle='#888'; ctx.font=`${Math.round(11*sc)}px "SoupOfJustice",monospace`; ctx.textAlign='center'; ctx.fillText('DIST',px+pw/2,py-8*sc);
   }
 
   _rGO(ctx,W,H){
@@ -766,12 +769,13 @@ class Game {
     ctx.fillStyle='rgba(0,0,0,0.78)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center';
     const w=this.goReason.includes('WIN');
     ctx.shadowColor=w?'#ffcc00':'#ff0000'; ctx.shadowBlur=25*sc;
-    ctx.fillStyle=w?'#ffcc00':'#ff4444'; ctx.font=`bold ${Math.round(Math.min(60,W*.08)*sc)}px "Courier New",monospace`;
+    ctx.fillStyle=w?'#ffcc00':'#ff4444'; ctx.font=`bold ${Math.round(Math.min(60,W*.08)*sc)}px "SoupOfJustice","Courier New",monospace`;
     ctx.fillText(this.goReason,W/2,H/2-20*sc); ctx.shadowBlur=0;
     const isMobile = 'ontouchstart' in window;
-    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(20*sc)}px monospace`; ctx.fillText(isMobile ? '[ TAP to continue ]' : '[ Press ENTER ]',W/2,H/2+40*sc);
-    const m=Math.floor(this.matchTmr/60),s=Math.floor(this.matchTmr%60);
-    ctx.fillStyle='#888'; ctx.font=`${Math.round(16*sc)}px monospace`; ctx.fillText(`Time: ${m}:${String(s).padStart(2,'0')}`,W/2,H/2+70*sc);
+    ctx.fillStyle='#aaa'; ctx.font=`${Math.round(20*sc)}px "SoupOfJustice",monospace`; ctx.fillText(isMobile ? '[ TAP to continue ]' : '[ Press ENTER ]',W/2,H/2+40*sc);
+    const remaining=Math.max(0, CFG.TIMEOUT - this.matchTmr);
+    const m=Math.floor(remaining/60),s=Math.floor(remaining%60);
+    ctx.fillStyle='#888'; ctx.font=`${Math.round(16*sc)}px "SoupOfJustice",monospace`; ctx.fillText(`Time: ${m}:${String(s).padStart(2,'0')}`,W/2,H/2+70*sc);
   }
 
   _rr(ctx,x,y,w,h,r){
