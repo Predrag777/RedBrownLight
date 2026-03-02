@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RED LIGHT… BROWN LIGHT</title>
+  <link rel="stylesheet" href="style/main.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="hudCanvas"></canvas>
+    <div id="loading-screen">
+      <div class="load-inner">
+        <h1>RED LIGHT… <span class="brown">BROWN LIGHT</span></h1>
+        <div class="load-bar-bg"><div id="load-bar"></div></div>
+        <p id="load-text">Loading models…</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="JS/game.js"></script>
+</body>
+</html>

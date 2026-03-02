@@ -1,0 +1,84 @@
+/* =============================================
+   RED LIGHT… BROWN LIGHT — Main Stylesheet
+   Three.js 3D + HUD canvas overlay
+   ============================================= */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0d0907;
+  font-family: "Courier New", Courier, monospace;
+}
+
+#game-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Three.js renderer canvas (inserted first-child) */
+#game-container > canvas:first-child {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* HUD overlay canvas — on top of Three.js */
+#hudCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Selection prevention */
+#game-container * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Loading screen */
+#loading-screen {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: #0d0907;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.load-inner { text-align: center; }
+.load-inner h1 {
+  color: #ff4444;
+  font-size: 36px;
+  margin-bottom: 30px;
+  text-shadow: 0 0 20px rgba(255,50,50,0.4);
+}
+.load-inner h1 .brown {
+  color: #AA6633;
+  text-shadow: 0 0 20px rgba(139,69,19,0.4);
+}
+.load-bar-bg {
+  width: 350px; height: 12px;
+  background: #2a1a10;
+  border-radius: 6px;
+  margin: 0 auto 18px;
+  overflow: hidden;
+  border: 1px solid #3a2a1a;
+}
+#load-bar {
+  width: 0%; height: 100%;
+  background: linear-gradient(90deg, #44cc44, #66ff66);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+#load-text { color: #888; font-size: 14px; }
