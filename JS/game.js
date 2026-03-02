@@ -180,19 +180,36 @@ class LightSystem {
 // ======================== AI =========================================
 class AIEntity {
   constructor(x, z, type, name) {
+    this.startX = x;        // remember spawn X for respawn
     this.x = x; this.z = z; this.type = type; this.name = name;
     this.speed = 0;
     this.vx = 0;            // push velocity X
     this.vz = 0;            // push velocity Z
     this.blasted = false;
+    this.respawnTmr = 0;    // countdown to respawn after blast
     this.stunTmr = 0;
     this.brain = null;      // will be set for pirates
-    this.holdTmr = 0;       // simulated hold for non-pirate AI
+    this.holdTmr = 0;
     this.brakeTmr = 0;
   }
 
   update(dt, light, player, allAI, myIdx) {
-    if (this.blasted) return;
+    // --- Respawn countdown (same as player: 2s then reset) ---
+    if (this.blasted) {
+      this.respawnTmr -= dt;
+      if (this.respawnTmr <= 0) {
+        this.blasted = false;
+        this.speed = 0;
+        this.vx = 0;
+        this.vz = 0;
+        this.stunTmr = 0;
+        // Reset to start of field at original X lane
+        this.z = 0;
+        this.x = this.startX;
+        if (this.brain) this.brain.accT = 0;
+      }
+      return;
+    }
 
     // --- Brain-controlled AI (pirate etc.) handles EVERYTHING ---
     if (this.brain) {
@@ -571,15 +588,32 @@ class Scene3D {
     this.mixers.push(gm);
     this._label(this.grannyMesh,'GRANNY FARTS','#44ff44',6);
 
-    // --- AI bots (Spacesuit + Pirate alternating) ---
+    // Store FBX sources for later — meshes created per match in buildAIMeshes()
+    this._suitFBX=suitFBX;
+    this._pirateFBX=pirateFBX;
     this.aiMeshes=[];
-    for(let i=0;i<CFG.AI_COUNT;i++){
-      const src=i%2===0?suitFBX:pirateFBX;
+    this.aiMixers=[];
+  }
+
+  /** Create AI meshes to match the actual AI types (called after _makeAI) */
+  buildAIMeshes(aiList){
+    // Remove old AI meshes
+    for(const m of this.aiMeshes) this.scene.remove(m);
+    // Remove old AI mixers from the main mixer array
+    for(const mx of this.aiMixers){
+      const idx=this.mixers.indexOf(mx);
+      if(idx>=0) this.mixers.splice(idx,1);
+    }
+    this.aiMeshes=[];
+    this.aiMixers=[];
+    for(let i=0;i<aiList.length;i++){
+      const src=aiList[i].type==='pirate'?this._pirateFBX:this._suitFBX;
       const mesh=this._prep(src,CFG.MODEL_SCALE,false);
       this.scene.add(mesh);
       const mx=new THREE.AnimationMixer(mesh);
       if(this.idleClip){ const a=mx.clipAction(this.idleClip); a.play(); a.time=rand(0,a.getClip().duration); }
       this.mixers.push(mx);
+      this.aiMixers.push(mx);
       this.aiMeshes.push(mesh);
     }
   }
@@ -654,7 +688,9 @@ class Scene3D {
 
     // AI meshes
     if (game.ai) for(let i=0;i<game.ai.length&&i<this.aiMeshes.length;i++){
-      this.aiMeshes[i].position.set(game.ai[i].x,0,game.ai[i].z);
+      const a=game.ai[i];
+      this.aiMeshes[i].visible=!a.blasted;
+      if(!a.blasted) this.aiMeshes[i].position.set(a.x,0,a.z);
     }
 
     // blast glow
@@ -758,6 +794,7 @@ class Game {
     this.state='countdown'; this.cdTmr=0; this.cdNum=3; this.matchTmr=0; this.goReason='';
     this.shakeAmt=0; this.blastFx=null;
     this.player=new Player(CFG, lerp, clamp, targetSpeed, speedTier); this.grannyFarts=new GrannyFarts(); this.ai=this._makeAI();
+    if(this.scene3d) this.scene3d.buildAIMeshes(this.ai);
     this.light=new LightSystem(); this.light.onSwitch=s=>this._onLight(s);
     if(this.headerEl){ this.headerEl.className='brown'; this.headerEl.textContent='● BROWN LIGHT'; }
     this.audio.tick();
@@ -928,6 +965,12 @@ class Game {
           for(const a of this.ai){
             if(!a.blasted && (a.speed||0) > CFG.VEL_THRESHOLD){
               a.blasted=true; a.speed=0;
+              a.respawnTmr=2;  // respawn after 2 seconds (same as player)
+              // Spawn explosion same as player
+              if(this.scene3d&&this.scene3d.blastParticles){
+                this.scene3d.blastParticles.spawn(a.x, a.z);
+              }
+              this.audio.blast();
             }
           }
         }
