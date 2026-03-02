@@ -48,7 +48,7 @@ export class ZombieBrain {
 			}
 
 			this.accT += dt * 0.15;
-			e.speed = lerpFn(e.speed || 0, 8, dt * 1.3);
+			e.speed = lerpFn(e.speed || 0, 24, dt * 1.3);
 
 		} else if (isTurning) {
 			if (!this.decided) {
@@ -57,7 +57,7 @@ export class ZombieBrain {
 			}
 
 			if (this.willFail) {
-				e.speed = lerpFn(e.speed || 0, 8, dt * 1.1);
+				e.speed = lerpFn(e.speed || 0, 24, dt * 1.1);
 			} else {
 				e.speed = this._brakeStep(e.speed || 0, cfg, dt, 0.5);
 			}

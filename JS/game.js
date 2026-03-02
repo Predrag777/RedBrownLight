@@ -6,7 +6,6 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { PirateBrain } from './characterBrain/pirate.js';
 import { Player } from './characterBrain/myPlayer.js';
-import { SpacesuitBrain } from './characterBrain/spacesuit.js';
 import { RapperBrain } from './characterBrain/rapper.js';
 import { ZombieBrain } from './characterBrain/zombie.js';
 import { MariachiBrain } from './characterBrain/mariachi.js';
@@ -643,14 +642,13 @@ class Scene3D {
     const base='characters/FBX%20Files/';
     const load = n => new Promise((res,rej)=> loader.load(base+encodeURIComponent(n),res,undefined,rej));
 
-    let done=0; const total=10;
+    let done=0; const total=9;
     const tick=label=>{ done++; if(onProgress) onProgress(done/total,label); };
 
     const playerFBX = await load('MrFarts.fbx');         tick('MrFarts loaded');
     const idleFBX   = await load('MrFarts Idle.fbx');    this.idleClip=idleFBX.animations[0]||null; tick('Idle anim loaded');
     const runFBX    = await load('MrFarts Running.fbx'); this.runClip=runFBX.animations[0]||null;    tick('Run anim loaded');
     const grannyFBX = await load('Grandma.fbx');         tick('Grandma loaded');
-    const suitFBX   = await load('Spacesuit.fbx');       tick('Spacesuit loaded');
     const pirateFBX = await load('Pirate.fbx');          tick('Pirate loaded');
     const rapperFBX = await load('Rapper.fbx');           tick('Rapper loaded');
     const zombieFBX = await load('Zombie.fbx');            tick('Zombie loaded');
@@ -682,7 +680,6 @@ class Scene3D {
     this._scatterTrees(treeFBX);
 
     // Store FBX sources for later — meshes created per match in buildAIMeshes()
-    this._suitFBX=suitFBX;
     this._pirateFBX=pirateFBX;
     this._rapperFBX=rapperFBX;
     this._zombieFBX=zombieFBX;
@@ -711,7 +708,7 @@ class Scene3D {
         case 'rapper': src=this._rapperFBX; break;
         case 'zombie': src=this._zombieFBX; break;
         case 'mariachi': src=this._mariachiFBX; break;
-        default: src=this._suitFBX; break;
+        default: src=this._pirateFBX; break;
       }
       const mesh=this._prep(src,CFG.MODEL_SCALE,false);
       this.scene.add(mesh);
@@ -919,24 +916,36 @@ class Game {
 
   _makeAI(){
     const types=[];
-    for(let i=0;i<4;i++) types.push('demon');
-    for(let i=0;i<4;i++) types.push('steady');
-    for(let i=0;i<5;i++) types.push('pirate');
-    for(let i=0;i<3;i++) types.push('spacesuit');
-    for(let i=0;i<3;i++) types.push('rapper');
-    for(let i=0;i<3;i++) types.push('zombie');
-    for(let i=0;i<3;i++) types.push('mariachi');
+    for(let i=0;i<4;i++) types.push('pirate');
+    for(let i=0;i<4;i++) types.push('rapper');
+    for(let i=0;i<4;i++) types.push('zombie');
+    for(let i=0;i<4;i++) types.push('mariachi');
+    // Shuffle
     for(let i=types.length-1;i>0;i--){ const j=randI(0,i);[types[i],types[j]]=[types[j],types[i]]; }
-    const count = types.length;
+
+    const count = types.length; // 16
     const margin = 4;
-    const usableW = CFG.FIELD_W - margin * 2;
-    const laneGap = usableW / (count - 1);
-    return types.map((t,i)=>{
-      const laneX = -CFG.FIELD_W / 2 + margin + i * laneGap;
-      const staggerZ = -2 - (i % 3) * 4;
-      const ai = new AIEntity(laneX, staggerZ, t, `Bot-${i+1}`);
+    const usableW = CFG.FIELD_W - margin * 2; // 72
+    const totalSlots = count + 1; // 17 (16 bots + 1 player gap)
+    const slotW = usableW / totalSlots;
+
+    // Build 17 evenly-spaced X slots
+    const allSlots = [];
+    for (let s = 0; s < totalSlots; s++) {
+      allSlots.push(-usableW / 2 + (s + 0.5) * slotW);
+    }
+    // Remove the slot closest to x=0 (player's lane)
+    let closestIdx = 0;
+    for (let s = 1; s < allSlots.length; s++) {
+      if (Math.abs(allSlots[s]) < Math.abs(allSlots[closestIdx])) closestIdx = s;
+    }
+    allSlots.splice(closestIdx, 1); // now 16 slots
+
+    return types.map((t, i) => {
+      const laneX = allSlots[i];
+      const laneZ = (i % 2 === 0) ? -3 : -9; // stagger into 2 rows
+      const ai = new AIEntity(laneX, laneZ, t, `Bot-${i + 1}`);
       if(t==='pirate') ai.brain=new PirateBrain(ai);
-      else if(t==='spacesuit') ai.brain=new SpacesuitBrain(ai);
       else if(t==='rapper') ai.brain=new RapperBrain(ai);
       else if(t==='zombie') ai.brain=new ZombieBrain(ai);
       else if(t==='mariachi') ai.brain=new MariachiBrain(ai);
