@@ -730,6 +730,12 @@ class Scene3D {
     fbx.traverse(c=>{
       if(c.isMesh){
         c.castShadow=false; c.receiveShadow=false;
+
+        // Skip empty meshes (e.g. RetopoFlow001 leftover from modeling)
+        if(!c.geometry || !c.geometry.attributes.position || c.geometry.attributes.position.count === 0){
+          c.visible = false;
+          return;
+        }
         const ms=Array.isArray(c.material)?c.material:[c.material];
         ms.forEach(m=>{ m.roughness=0.7; m.metalness=0.1; if(m.map) m.map.colorSpace=THREE.SRGBColorSpace; });
 
