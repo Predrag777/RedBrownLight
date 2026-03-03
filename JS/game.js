@@ -420,7 +420,14 @@ class Scene3D {
     this.container=container;
 
     // renderer — optimized for Android WebView WebGL compatibility
-    this.renderer=new THREE.WebGLRenderer({antialias:false, alpha:false, powerPreference:'high-performance'});
+    try {
+      this.renderer=new THREE.WebGLRenderer({antialias:false, alpha:false, powerPreference:'default', failIfMajorPerformanceCaveat:false});
+    } catch(e) {
+      console.error('WebGL init failed:', e);
+      const msg = document.getElementById('load-text');
+      if(msg) msg.textContent = 'WebGL not supported on this device';
+      return;
+    }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
     this.renderer.shadowMap.enabled=false;
