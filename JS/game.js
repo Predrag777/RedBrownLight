@@ -732,16 +732,49 @@ class Scene3D {
         c.castShadow=false; c.receiveShadow=false;
         const ms=Array.isArray(c.material)?c.material:[c.material];
         ms.forEach(m=>{ m.roughness=0.7; m.metalness=0.1; if(m.map) m.map.colorSpace=THREE.SRGBColorSpace; });
-        // Force geometry buffer re-upload for Android WebView WebGL
+
+        // Android WebView WebGL fix: clone geometry to force fresh GPU buffers
         if(c.geometry){
-          const pos=c.geometry.attributes.position;
-          if(pos) pos.needsUpdate=true;
-          if(c.geometry.index) c.geometry.index.needsUpdate=true;
-          if(c.geometry.attributes.normal) c.geometry.attributes.normal.needsUpdate=true;
-          if(c.geometry.attributes.uv) c.geometry.attributes.uv.needsUpdate=true;
-          if(c.geometry.attributes.skinWeight) c.geometry.attributes.skinWeight.needsUpdate=true;
-          if(c.geometry.attributes.skinIndex) c.geometry.attributes.skinIndex.needsUpdate=true;
+          const oldGeo = c.geometry;
+          let newGeo;
+
+          if(c.isSkinnedMesh){
+            // For skinned meshes, clone and preserve skeleton data
+            newGeo = oldGeo.clone();
+          } else {
+            // For regular meshes, convert to non-indexed for maximum compatibility
+            newGeo = oldGeo.index ? oldGeo.toNonIndexed() : oldGeo.clone();
+          }
+
+          // Explicitly set draw range
+          if(newGeo.index){
+            newGeo.setDrawRange(0, newGeo.index.count);
+            newGeo.index.needsUpdate = true;
+          } else if(newGeo.attributes.position){
+            newGeo.setDrawRange(0, newGeo.attributes.position.count);
+          }
+
+          // Clear any groups that might cause zero-length draws
+          if(newGeo.groups.length === 0 && newGeo.attributes.position){
+            const count = newGeo.index ? newGeo.index.count : newGeo.attributes.position.count;
+            newGeo.addGroup(0, count, 0);
+          }
+
+          // Force all attributes to re-upload
+          for(const key in newGeo.attributes){
+            newGeo.attributes[key].needsUpdate = true;
+          }
+
+          // Compute missing normals
+          if(!newGeo.attributes.normal) newGeo.computeVertexNormals();
+
+          c.geometry = newGeo;
+
+          console.log('Prep mesh:', c.name, 'verts:', newGeo.attributes.position?.count,
+            'idx:', newGeo.index?.count, 'skinned:', !!c.isSkinnedMesh,
+            'groups:', newGeo.groups.length);
         }
+
         // Rebind SkinnedMesh skeletons for Android WebView compatibility
         if(c.isSkinnedMesh && c.skeleton){
           c.skeleton.calculateInverses();
