@@ -419,20 +419,19 @@ class Scene3D {
   constructor(container){
     this.container=container;
 
-    // renderer
-    this.renderer=new THREE.WebGLRenderer({antialias:true, alpha:true});
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
+    // renderer — optimized for Android WebView WebGL compatibility
+    this.renderer=new THREE.WebGLRenderer({antialias:false, alpha:false, powerPreference:'high-performance'});
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
-    this.renderer.shadowMap.enabled=true;
-    this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled=false;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure=1.6;
     container.insertBefore(this.renderer.domElement,container.firstChild);
 
-    // scene — bright sky
+    // scene — bright sky (solid background, not transparent)
     this.scene=new THREE.Scene();
-    this.scene.background = null;
+    this.scene.background = new THREE.Color(0x87ceeb);
     this.scene.fog=new THREE.Fog(0x87ceeb,300,700);
 
     // camera — third-person behind player
@@ -480,12 +479,7 @@ class Scene3D {
     this.scene.add(new THREE.HemisphereLight(0xffffff,0x88aacc,0.9));
     this.dirLight=new THREE.DirectionalLight(0xffffff,2.2);
     this.dirLight.position.set(30,80,60);
-    this.dirLight.castShadow=true;
-    this.dirLight.shadow.mapSize.set(2048,2048);
-    this.dirLight.shadow.camera.near=1; this.dirLight.shadow.camera.far=400;
-    this.dirLight.shadow.camera.left=-100; this.dirLight.shadow.camera.right=100;
-    this.dirLight.shadow.camera.top=200; this.dirLight.shadow.camera.bottom=-200;
-    this.dirLight.shadow.bias=-0.001;
+    this.dirLight.castShadow=false;
     this.scene.add(this.dirLight); this.scene.add(this.dirLight.target);
     this.moodLight=new THREE.DirectionalLight(0xffffff,0.5);
     this.moodLight.position.set(-20,40,-30);
@@ -498,7 +492,7 @@ class Scene3D {
     const grassMat=new THREE.MeshStandardMaterial({color:0x79b901,roughness:0.9,metalness:0});
     const grass=new THREE.Mesh(grassGeo,grassMat);
     grass.rotation.x=-Math.PI/2; grass.position.set(0,-0.05,CFG.FIELD_L/2);
-    grass.receiveShadow=true; this.scene.add(grass);
+    this.scene.add(grass);
 
     // --- White track ---
     this.ground=new THREE.Mesh(
@@ -507,7 +501,6 @@ class Scene3D {
     );
     this.ground.rotation.x=-Math.PI/2;
     this.ground.position.set(0,0,CFG.FIELD_L/2);
-    this.ground.receiveShadow=true;
     this.scene.add(this.ground);
 
     // --- Lane lines (subtle grey stripes) ---
@@ -524,7 +517,7 @@ class Scene3D {
     for(const s of[-1,1]){
       const w=new THREE.Mesh(new THREE.BoxGeometry(1,0.5,CFG.FIELD_L+40),borderMat);
       w.position.set(s*(CFG.FIELD_W/2+0.5),0.25,CFG.FIELD_L/2);
-      w.receiveShadow=true; this.scene.add(w);
+      this.scene.add(w);
     }
 
     // finish zone tint
@@ -605,8 +598,8 @@ class Scene3D {
     const trunkCount = Math.max(1, Math.floor(meshes.length / 3));
 
     meshes.forEach((m, idx) => {
-      m.castShadow = true;
-      m.receiveShadow = true;
+      m.castShadow = false;
+      m.receiveShadow = false;
       const mats = Array.isArray(m.material) ? m.material : [m.material];
       const isTrunk = idx < trunkCount;
       mats.forEach(mat => {
@@ -729,9 +722,25 @@ class Scene3D {
     fbx.scale.set(scale,scale,scale);
     fbx.traverse(c=>{
       if(c.isMesh){
-        c.castShadow=shadow; c.receiveShadow=true;
+        c.castShadow=false; c.receiveShadow=false;
         const ms=Array.isArray(c.material)?c.material:[c.material];
         ms.forEach(m=>{ m.roughness=0.7; m.metalness=0.1; if(m.map) m.map.colorSpace=THREE.SRGBColorSpace; });
+        // Force geometry buffer re-upload for Android WebView WebGL
+        if(c.geometry){
+          const pos=c.geometry.attributes.position;
+          if(pos) pos.needsUpdate=true;
+          if(c.geometry.index) c.geometry.index.needsUpdate=true;
+          if(c.geometry.attributes.normal) c.geometry.attributes.normal.needsUpdate=true;
+          if(c.geometry.attributes.uv) c.geometry.attributes.uv.needsUpdate=true;
+          if(c.geometry.attributes.skinWeight) c.geometry.attributes.skinWeight.needsUpdate=true;
+          if(c.geometry.attributes.skinIndex) c.geometry.attributes.skinIndex.needsUpdate=true;
+        }
+        // Rebind SkinnedMesh skeletons for Android WebView compatibility
+        if(c.isSkinnedMesh && c.skeleton){
+          c.skeleton.calculateInverses();
+          c.skeleton.computeBoneTexture();
+          c.bind(c.skeleton, c.bindMatrix);
+        }
       }
     });
     g.add(fbx); return g;
@@ -865,7 +874,7 @@ class Scene3D {
   _onResize(){
     this.camera.aspect=window.innerWidth/window.innerHeight;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     this.renderer.setSize(window.innerWidth,window.innerHeight);
   }
 }
