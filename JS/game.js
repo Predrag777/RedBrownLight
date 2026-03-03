@@ -2,8 +2,8 @@
 //  RED LIGHT… BROWN LIGHT  —  3D Phase with FBX Characters
 //  Three.js renderer  +  2D HUD overlay
 // =====================================================================
-import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js';
+import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/loaders/FBXLoader.js';
 import { PirateBrain } from './characterBrain/pirate.js';
 import { Player } from './characterBrain/myPlayer.js';
 import { SpacesuitBrain } from './characterBrain/spacesuit.js';
